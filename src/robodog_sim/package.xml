@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>robodog_sim</name>
+  <version>0.1.0</version>
+  <description>Convenience simulation launcher for the OpenQuadruped model.</description>
+  <maintainer email="friday@todo.todo">friday</maintainer>
+  <license>TODO: confirm project license</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <exec_depend>open_quadruped</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
