@@ -1,0 +1,4 @@
+trial=20261115_151054_trial
+samples=3424
+first_anomaly=foot_contact_loss; t=1.100000; joint=none; detail=back_left contact lost; probable=foot unloaded or lost ground contact
+first_foot_contact_loss=t=1.100000; joint=none; back_left contact lost

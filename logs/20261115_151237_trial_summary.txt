@@ -1,0 +1,5 @@
+trial=20261115_151237_trial
+samples=3231
+first_anomaly=foot_contact_loss; t=1.100000; joint=none; detail=back_left contact lost; probable=foot unloaded or lost ground contact
+first_foot_contact_loss=t=1.100000; joint=none; back_left contact lost
+first_effort_saturation=t=51.300000; joint=motor_back_left_upper_leg; effort=-4.0000 Nm, limit=4.0000 Nm
