@@ -41,12 +41,12 @@
         <material name="${matname}"/>
       </visual>
 
-      <collision>
-        <origin rpy="${origin_rpy}" xyz="${c_xyz}" />
-        <geometry>
-          <box size="${length} ${width} ${height}" />
-        </geometry>
-      </collision>
+	<collision>
+  	<origin rpy="${origin_rpy}" xyz="${c_xyz}" />
+  	<geometry>
+    	<box size="${length} ${width} ${height}" />
+  	</geometry>
+	</collision>
 
       <inertial>
         <mass value="${mass}" />
@@ -57,8 +57,8 @@
     <gazebo reference="${name}">
         <!-- The imported meshes are visual assets; their legacy collision
              frames are not physically consistent with the link frames. -->
+        <!-- Gravity is restored after ros2_control has latched the startup pose. -->
         <gravity>false</gravity>
-        <collide_bitmask>0x0</collide_bitmask>
         <xacro:if value="${matname == 'black'}">
           <material>Gazebo/Black</material>
         </xacro:if>
@@ -101,13 +101,13 @@
     </link>
 
     <gazebo reference="${name}">
+      <!-- Gravity is restored after ros2_control has latched the startup pose. -->
       <gravity>false</gravity>
-      <collide_bitmask>0x0</collide_bitmask>
-      <kp>1000000.0</kp>
-      <kd>1.0</kd>
+      <kp>10000.0</kp>
+      <kd>10.0</kd>
       <mu1>0.8</mu1>
       <mu2>0.8</mu2>
-      <maxVel>0.0</maxVel>
+      <maxVel>1.0</maxVel>
       <minDepth>0.001</minDepth>
       <material>Gazebo/Orange</material>
     </gazebo>

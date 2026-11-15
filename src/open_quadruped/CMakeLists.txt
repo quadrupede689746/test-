@@ -13,6 +13,9 @@ ament_export_dependencies(rosidl_default_runtime)
 install(PROGRAMS
   nodes/interface_process.py
   nodes/joint_angles_to_trajectory.py
+  nodes/trajectory_to_effort.py
+  nodes/enable_robot_gravity.py
+  nodes/keyboard_walk.py
   nodes/keyboard_foot_control.py
   nodes/crawl_gait_coordinator.py
   DESTINATION lib/${PROJECT_NAME}
@@ -22,6 +25,7 @@ install(DIRECTORY
   config
   launch
   urdf
+  worlds
   DESTINATION share/${PROJECT_NAME}
 )
 

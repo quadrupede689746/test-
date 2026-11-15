@@ -103,7 +103,9 @@ def launch_setup(context, *args, **kwargs):
             '-entity', 'open_quadruped',
             '-x', '0.0',
             '-y', '0.0',
-            '-z', '0.30',
+            # At the all-zero joint pose, FK puts the foot-sphere centers at
+            # z=-0.2222 m relative to base_link; 0.245 m gives ~3 mm clearance.
+            '-z', '0.245',
         ],
     )
 
@@ -158,37 +160,57 @@ def launch_setup(context, *args, **kwargs):
         }],
     )
 
+
+
     # --------------------------------------------------
     # 9. Spawn controllers AFTER robot insertion
     # --------------------------------------------------
 
-    spawn_controllers = [
-            Node(
-                package='controller_manager',
-                executable='spawner',
-                arguments=[
-                    'joint_state_broadcaster',
-                    '--controller-manager',
-                    '/controller_manager',
-                    '--controller-manager-timeout',
-                    '120',
-                ],
-                output='screen',
-            ),
-
-            Node(
-                package='controller_manager',
-                executable='spawner',
-                arguments=[
-                    'quadruped_controller',
-                    '--controller-manager',
-                    '/controller_manager',
-                    '--controller-manager-timeout',
-                    '120',
-                ],
-                output='screen',
-            ),
-    ]
+    load_joint_state_broadcaster = Node(
+        package='controller_manager',
+        executable='spawner',
+        arguments=[
+            'joint_state_broadcaster', '--inactive',
+            '--controller-manager', '/controller_manager',
+            '--controller-manager-timeout', '120',
+        ],
+        output='screen',
+    )
+    load_quadruped_controller = Node(
+        package='controller_manager',
+        executable='spawner',
+        arguments=[
+            'quadruped_controller', '--inactive',
+            '--controller-manager', '/controller_manager',
+            '--controller-manager-timeout', '120',
+        ],
+        output='screen',
+    )
+    unpause_world = ExecuteProcess(
+        cmd=['ros2', 'service', 'call', '/unpause_physics', 'std_srvs/srv/Empty', '{}'],
+        output='screen',
+    )
+    activate_controllers = Node(
+        package='controller_manager',
+        executable='spawner',
+        arguments=[
+            'joint_state_broadcaster', 'quadruped_controller',
+            '--controller-manager', '/controller_manager',
+            '--controller-manager-timeout', '120',
+            '--switch-timeout', '15',
+        ],
+        output='screen',
+    )
+    enable_gravity = Node(
+        package='open_quadruped',
+        executable='enable_robot_gravity.py',
+        name='enable_robot_gravity',
+        output='screen',
+        parameters=[{
+            'model_name': 'open_quadruped',
+            'settle_delay_sec': 1.0,
+        }],
+    )
 
     return [
         robot_state_publisher,
@@ -200,7 +222,31 @@ def launch_setup(context, *args, **kwargs):
         RegisterEventHandler(
             OnProcessExit(
                 target_action=spawn_robot,
-                on_exit=spawn_controllers,
+                on_exit=[load_joint_state_broadcaster],
+            )
+        ),
+        RegisterEventHandler(
+            OnProcessExit(
+                target_action=load_joint_state_broadcaster,
+                on_exit=[load_quadruped_controller],
+            )
+        ),
+        RegisterEventHandler(
+            OnProcessExit(
+                target_action=load_quadruped_controller,
+                on_exit=[unpause_world],
+            )
+        ),
+        RegisterEventHandler(
+            OnProcessExit(
+                target_action=unpause_world,
+                on_exit=[activate_controllers],
+            )
+        ),
+        RegisterEventHandler(
+            OnProcessExit(
+                target_action=activate_controllers,
+                on_exit=[enable_gravity],
             )
         ),
     ]
@@ -216,8 +262,9 @@ def generate_launch_description():
     # which prevents Gazebo from loading the ROS factory plugin.  Keep the
     # same official plugins, but pass each option and value as separate argv
     # entries so /spawn_entity is guaranteed to be created.
-    gazebo_ros_share = get_package_share_directory('gazebo_ros')
-    gazebo_world = os.path.join(gazebo_ros_share, 'worlds', 'empty.world')
+    gazebo_world = os.path.join(
+        get_package_share_directory('open_quadruped'), 'worlds', 'crawl.world'
+    )
 
     # Both gzserver and gzclient must be able to resolve model:// mesh URIs.
     # The parent of the package share directory contains the
@@ -229,7 +276,7 @@ def generate_launch_description():
     ])
     gazebo = ExecuteProcess(
         cmd=[
-            'gzserver', gazebo_world,
+            'gzserver', '-u', gazebo_world,
             '-s', 'libgazebo_ros_init.so',
             '-s', 'libgazebo_ros_factory.so',
             '--verbose',
