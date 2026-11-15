@@ -2,30 +2,29 @@
 """Slow keyboard crawl/trot using FK and IK parsed from the installed URDF."""
 
 import math
-import os
-import select
-import subprocess
 import sys
 import termios
 import time
 import tty
-import xml.etree.ElementTree as ET
 
 import numpy as np
 import rclpy
 from ament_index_python.packages import get_package_share_directory
 from gazebo_msgs.msg import ContactsState
-from gazebo_msgs.msg import ModelStates
+from gazebo_msgs.msg import ModelStates, ModelState
+from gazebo_msgs.srv import SetModelState
+from kinematics import UrdfLegKinematics, FOOT_LINKS, LEGS
+from keyboard_input import read_key
+from safety_monitor import SafetyMonitor, SafetyState
+from balance import convex_hull, stability_margin
+from gait_generator import CRAWL_OFFSETS, TROT_OFFSETS, swing_legs
 from rclpy.node import Node
 from rclpy.parameter import Parameter
-from sensor_msgs.msg import JointState
+from sensor_msgs.msg import JointState, Imu
 from std_msgs.msg import String
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 
 
-LEGS = ('fl', 'fr', 'bl', 'br')
-FOOT_LINKS = {'fl': 'front_left_foot', 'fr': 'front_right_foot',
-              'bl': 'back_left_foot', 'br': 'back_right_foot'}
 JOINT_NAMES = [
     f'motor_{side}_{joint}'
     for side in ('front_left', 'front_right', 'back_left', 'back_right')
@@ -45,173 +44,6 @@ SWING_CLEARANCE_XY = {
     'fl': (0.013, 0.028), 'fr': (0.013, -0.028),
     'bl': (-0.013, 0.052), 'br': (-0.013, -0.052),
 }
-
-
-def _origin(element):
-    if element is None:
-        return np.eye(4)
-    xyz = np.fromstring(element.get('xyz', '0 0 0'), sep=' ')
-    rpy = np.fromstring(element.get('rpy', '0 0 0'), sep=' ')
-    roll, pitch, yaw = rpy
-    cr, sr = math.cos(roll), math.sin(roll)
-    cp, sp = math.cos(pitch), math.sin(pitch)
-    cy, sy = math.cos(yaw), math.sin(yaw)
-    rx = np.array([[1, 0, 0], [0, cr, -sr], [0, sr, cr]])
-    ry = np.array([[cp, 0, sp], [0, 1, 0], [-sp, 0, cp]])
-    rz = np.array([[cy, -sy, 0], [sy, cy, 0], [0, 0, 1]])
-    transform = np.eye(4)
-    transform[:3, :3] = rz @ ry @ rx
-    transform[:3, 3] = xyz
-    return transform
-
-
-def _axis_rotation(axis, angle):
-    axis = np.asarray(axis, dtype=float)
-    norm = np.linalg.norm(axis)
-    if norm < 1e-12:
-        raise ValueError('URDF revolute joint has a zero axis')
-    x, y, z = axis / norm
-    c, s, t = math.cos(angle), math.sin(angle), 1.0 - math.cos(angle)
-    transform = np.eye(4)
-    transform[:3, :3] = [
-        [t*x*x+c, t*x*y-s*z, t*x*z+s*y],
-        [t*x*y+s*z, t*y*y+c, t*y*z-s*x],
-        [t*x*z-s*y, t*y*z+s*x, t*z*z+c],
-    ]
-    return transform
-
-
-class UrdfLegKinematics:
-    """FK/IK chain for each foot, extracted from the package's Xacro URDF."""
-    def __init__(self):
-        package = get_package_share_directory('open_quadruped')
-        xacro_path = os.path.join(package, 'urdf', 'spot.urdf.xacro')
-        urdf = subprocess.run(
-            ['xacro', xacro_path], check=True, capture_output=True, text=True
-        ).stdout
-        root = ET.fromstring(urdf)
-        parent_joint = {}
-        for joint in root.findall('joint'):
-            parent = joint.find('parent').get('link')
-            child = joint.find('child').get('link')
-            parent_joint[child] = joint
-
-        self.urdf_joints = root.findall('joint')
-        self.link_inertials = []
-        self.total_mass = 0.0
-        for link in root.findall('link'):
-            inertial = link.find('inertial')
-            if inertial is None:
-                continue
-            mass = float(inertial.find('mass').get('value'))
-            self.link_inertials.append((link.get('name'), mass,
-                                        _origin(inertial.find('origin'))))
-            self.total_mass += mass
-        if self.total_mass <= 0.0:
-            raise ValueError('URDF has no positive link mass for support calculation')
-        self.com_xyz = self.com_xyz_at({})
-        self.com_xy = self.com_xyz[:2]
-
-        self.chains = {}
-        self.limits = {}
-        for leg, foot in FOOT_LINKS.items():
-            chain = []
-            link = foot
-            while link != 'base_link':
-                joint = parent_joint.get(link)
-                if joint is None:
-                    raise ValueError(f'No base_link-to-{foot} chain in the URDF')
-                chain.append(joint)
-                link = joint.find('parent').get('link')
-            chain.reverse()
-            actuated = []
-            for joint in chain:
-                if joint.get('type') == 'revolute':
-                    name = joint.get('name')
-                    limit = joint.find('limit')
-                    self.limits[name] = (
-                        float(limit.get('lower')), float(limit.get('upper'))
-                    )
-                    actuated.append(name)
-            if len(actuated) != 3:
-                raise ValueError(f'{foot} must have exactly three revolute joints')
-            self.chains[leg] = (chain, actuated)
-
-    def fk(self, leg, positions):
-        chain, names = self.chains[leg]
-        values = dict(zip(names, positions))
-        transform = np.eye(4)
-        for joint in chain:
-            transform = transform @ _origin(joint.find('origin'))
-            if joint.get('type') == 'revolute':
-                axis_element = joint.find('axis')
-                axis = np.fromstring(axis_element.get('xyz', '1 0 0'), sep=' ')
-                transform = transform @ _axis_rotation(axis, values[joint.get('name')])
-        return transform[:3, 3].copy()
-
-    def com_xyz_at(self, positions):
-        """Compute the full URDF mass center at the measured joint positions."""
-        transforms = {'base_link': np.eye(4)}
-        while True:
-            progress = False
-            for joint in self.urdf_joints:
-                parent = joint.find('parent').get('link')
-                child = joint.find('child').get('link')
-                if parent not in transforms or child in transforms:
-                    continue
-                transform = transforms[parent] @ _origin(joint.find('origin'))
-                if joint.get('type') == 'revolute':
-                    axis = np.fromstring(joint.find('axis').get('xyz', '1 0 0'), sep=' ')
-                    transform = transform @ _axis_rotation(
-                        axis, float(positions.get(joint.get('name'), 0.0))
-                    )
-                transforms[child] = transform
-                progress = True
-            if not progress:
-                break
-        weighted_com = np.zeros(3)
-        included_mass = 0.0
-        for name, mass, inertial_origin in self.link_inertials:
-            if name not in transforms:
-                continue
-            weighted_com += mass * (transforms[name] @ inertial_origin)[:3, 3]
-            included_mass += mass
-        if included_mass <= 0.0:
-            raise ValueError('Could not resolve URDF link transforms for COM')
-        return weighted_com / included_mass
-
-    def com_xy_at(self, positions):
-        return self.com_xyz_at(positions)[:2]
-
-    def ik(self, leg, target, seed):
-        """Damped least-squares IK; all geometry/limits come from the URDF."""
-        chain, names = self.chains[leg]
-        target = np.asarray(target, dtype=float)
-        q = np.asarray(seed, dtype=float).copy()
-        bounds = np.asarray([self.limits[name] for name in names], dtype=float)
-        for _ in range(50):
-            error = target - self.fk(leg, q)
-            if np.linalg.norm(error) < 2e-4:
-                return q.tolist()
-            jacobian = np.zeros((3, 3))
-            epsilon = 1e-5
-            for index in range(3):
-                shifted = q.copy()
-                shifted[index] += epsilon
-                jacobian[:, index] = (self.fk(leg, shifted) - self.fk(leg, q)) / epsilon
-            damping = 0.003
-            delta = np.linalg.solve(
-                jacobian.T @ jacobian + damping * damping * np.eye(3),
-                jacobian.T @ error,
-            )
-            largest = float(np.max(np.abs(delta)))
-            if largest > 0.12:
-                delta *= 0.12 / largest
-            q = np.clip(q + delta, bounds[:, 0], bounds[:, 1])
-        residual = float(np.linalg.norm(target - self.fk(leg, q)))
-        if residual > 0.002:
-            raise ValueError(f'{leg.upper()} target is unreachable (error {residual:.4f} m)')
-        return q.tolist()
 
 
 class KeyboardWalk(Node):
@@ -261,6 +93,11 @@ class KeyboardWalk(Node):
         self.status_publisher = self.create_publisher(String, '/keyboard_walk/status', 10)
         self.create_subscription(String, '/robot_logger/safety_stop', self._safety_stop, 10)
         self.contacts = {leg: None for leg in LEGS}
+        self.safety = SafetyMonitor()
+        self.stable_since = None
+        self.last_pitch = None
+        self.last_base_z = None
+        self.stable_ready = False
         self.base_xyz = None
         self.base_rotation = None
         self.base_yaw = None
@@ -278,6 +115,8 @@ class KeyboardWalk(Node):
         )
         self.create_subscription(ModelStates, '/gazebo/model_states',
                                  self._on_model_states, 10)
+        self.create_subscription(Imu, '/imu', self._on_imu, 10)
+        self.reset_client = self.create_client(SetModelState, '/gazebo/set_model_state')
         self.home = None
         self.home_feet = None
         self.last_output = None
@@ -326,9 +165,47 @@ class KeyboardWalk(Node):
             [2*(x*y + z*w), 1 - 2*(x*x + z*z), 2*(y*z - x*w)],
             [2*(x*z - y*w), 2*(y*z + x*w), 1 - 2*(x*x + y*y)],
         ])
+        self.last_base_z = float(pose.position.z)
+        self.last_pitch = math.asin(float(np.clip(-self.base_rotation[2, 0], -1, 1)))
         self.base_yaw = math.atan2(self.base_rotation[1, 0],
                                    self.base_rotation[0, 0])
         self._initialize_home_if_ready()
+
+
+    def _on_imu(self, msg):
+        q = msg.orientation
+        sinp = 2.0 * (q.w*q.y - q.z*q.x)
+        pitch = math.asin(float(np.clip(sinp, -1.0, 1.0)))
+        sinr = 2.0 * (q.w*q.x + q.y*q.z)
+        cosr = 1.0 - 2.0 * (q.x*q.x + q.y*q.y)
+        roll = math.atan2(sinr, cosr)
+        contacts = {leg: value is True for leg, value in self.contacts.items()}
+        state = self.safety.evaluate(roll=roll, pitch=pitch,
+            angular_speed=float(np.linalg.norm([msg.angular_velocity.x, msg.angular_velocity.y])),
+            contacts=contacts if all(value is not None for value in self.contacts.values()) else None)
+        if state is SafetyState.FALL:
+            self.vx = self.vy = self.yaw = 0.0
+            self.motion_started = None
+            self.get_logger().fatal(f'FALL detected by /imu (roll={roll:.3f}, pitch={pitch:.3f}); movement locked.')
+        elif state is SafetyState.WARNING and (abs(roll) > .25 or abs(pitch) > .25):
+            self.vx = self.vy = self.yaw = 0.0
+            self.motion_started = None
+            self.get_logger().error('WARNING from /imu; stopping gait and returning to stand pose.')
+            if self.home is not None:
+                self._publish(self._home_output(), 1.0)
+
+    def _is_stable(self):
+        ready = (self.home is not None and self.last_pitch is not None and self.last_base_z is not None
+                 and abs(self.last_pitch) < .12 and all(v is True for v in self.contacts.values()))
+        now = time.monotonic()
+        if ready:
+            if self.stable_since is None:
+                self.stable_since = now
+            self.stable_ready = now - self.stable_since >= 2.0
+        else:
+            self.stable_since = None
+            self.stable_ready = False
+        return self.stable_ready
 
     def _on_joint_state(self, msg):
         positions = dict(zip(msg.name, msg.position))
@@ -398,25 +275,7 @@ class KeyboardWalk(Node):
 
     @staticmethod
     def _convex_hull(points):
-        points = sorted({(float(point[0]), float(point[1])) for point in points})
-        if len(points) <= 2:
-            return points
-
-        def cross(a, b, c):
-            return ((b[0] - a[0]) * (c[1] - a[1])
-                    - (b[1] - a[1]) * (c[0] - a[0]))
-
-        lower = []
-        for point in points:
-            while len(lower) >= 2 and cross(lower[-2], lower[-1], point) <= 0.0:
-                lower.pop()
-            lower.append(point)
-        upper = []
-        for point in reversed(points):
-            while len(upper) >= 2 and cross(upper[-2], upper[-1], point) <= 0.0:
-                upper.pop()
-            upper.append(point)
-        return lower[:-1] + upper[:-1]
+        return convex_hull(points)
 
     def _support_translation(self, support_points, margin_m=0.005, com_xy=None):
         hull = self._convex_hull(support_points)
@@ -456,17 +315,7 @@ class KeyboardWalk(Node):
         return com - nearest_point - margin_m * nearest_normal
 
     def _support_margin(self, support_points):
-        hull = self._convex_hull(support_points)
-        if len(hull) < 3:
-            return -math.inf
-        com = self.kinematics.com_xy_at(self.joint_state)
-        distances = []
-        for i, a_tuple in enumerate(hull):
-            a = np.asarray(a_tuple)
-            edge = np.asarray(hull[(i + 1) % len(hull)]) - a
-            normal = np.array([-edge[1], edge[0]]) / np.linalg.norm(edge)
-            distances.append(float(np.dot(com - a, normal)))
-        return min(distances) if min(distances) >= 0.0 else -min(abs(d) for d in distances if d < 0.0)
+        return stability_margin(support_points, self.kinematics.com_xy_at(self.joint_state))
 
     def _measured_foot_xy(self, leg):
         names = self.kinematics.chains[leg][1]
@@ -524,6 +373,7 @@ class KeyboardWalk(Node):
             self.last_output = dict(zip(JOINT_NAMES, map(float, positions)))
 
     def _tick(self):
+        self._is_stable()
         if (self.home is None or self.home_feet is None
                 or self.base_xyz is None or self.base_rotation is None):
             return
@@ -562,8 +412,7 @@ class KeyboardWalk(Node):
         balance_shift = self._balance_shift(cycle_phase, elapsed)
         offsets = CRAWL_OFFSETS if self.gait == 'crawl' else TROT_OFFSETS
         stance = 1.0 - self.swing_fraction
-        swinging = [leg for leg in LEGS
-                    if (cycle_phase + offsets[leg]) % 1.0 >= stance]
+        swinging = list(swing_legs(elapsed, self.cycle_duration, self.gait, self.swing_fraction))
         if swinging:
             leg = swinging[0]
             supports = [other for other in LEGS if other != leg]
@@ -644,11 +493,9 @@ class KeyboardWalk(Node):
         self._publish(output)
 
     def handle_key(self, key):
-        if key in ('w', 's', 'a', 'd', 'q', 'e') and not all(
-            self.contacts[leg] is True for leg in LEGS
-        ):
+        if key in ('w', 's', 'a', 'd', 'q', 'e') and not self._is_stable():
             self.get_logger().warning(
-                f'Keyboard movement refused until all four feet contact the ground: {self.contacts}'
+                f'Keyboard movement refused until 4 contacts and stable base pose are maintained for 2 seconds.'
             )
             return
         if key == 'w': self.vx = 1.0; self.crouched = False
@@ -663,6 +510,21 @@ class KeyboardWalk(Node):
             self.get_logger().info('Stopped; returning to the measured stand pose.')
             if self.home is not None:
                 self._publish(self._home_output(), 0.5)
+        elif key in ('r', 'R'):
+            self.vx = self.vy = self.yaw = 0.0
+            self.motion_started = None
+            if not self.reset_client.wait_for_service(timeout_sec=0.2):
+                self.get_logger().error('Reset unavailable: /gazebo/set_model_state is not active.')
+            else:
+                state = ModelState()
+                state.model_name = 'open_quadruped'
+                state.pose.position.z = 0.22
+                state.pose.orientation.w = 1.0
+                request = SetModelState.Request(); request.model_state = state
+                self.reset_client.call_async(request)
+                self._publish(BENT_START_POSE, 1.0)
+                self.stable_since = None; self.stable_ready = False
+                self.get_logger().warning('Gazebo base reset requested; waiting for stable stand before movement.')
         elif key in ('x', 'X'):
             self.vx = self.vy = self.yaw = 0.0
             self.get_logger().warning(
@@ -683,13 +545,6 @@ class KeyboardWalk(Node):
         self._publish_status(key if key != ' ' else 'space')
 
 
-def read_key():
-    ready, _, _ = select.select([sys.stdin], [], [], 0.02)
-    if not ready:
-        return None
-    return os.read(sys.stdin.fileno(), 1).decode(errors='ignore')
-
-
 def main(args=None):
     if not sys.stdin.isatty():
         raise RuntimeError('Run keyboard_walk.py in an interactive terminal.')
@@ -697,7 +552,7 @@ def main(args=None):
     node = KeyboardWalk()
     fd = sys.stdin.fileno()
     old = termios.tcgetattr(fd)
-    print('\nKeyboard walk: w/s forward/back, a/d turn, q/e sidestep, SPACE stand/stop, x crouch (disabled), +/- stride, g crawl/trot, Ctrl+C quit.')
+    print('\nKeyboard walk: w/s forward/back, a/d turn, q/e sidestep, SPACE stand/stop, r reset after fall, x crouch (disabled), +/- stride, g crawl/trot, Ctrl+C quit.')
     try:
         tty.setcbreak(fd)
         while rclpy.ok():

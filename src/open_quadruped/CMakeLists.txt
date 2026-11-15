@@ -34,4 +34,18 @@ install(DIRECTORY
   DESTINATION share/${PROJECT_NAME}
 )
 
+install(FILES
+  nodes/kinematics.py
+  nodes/gait_generator.py
+  nodes/balance.py
+  nodes/safety_monitor.py
+  nodes/keyboard_input.py
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+if(BUILD_TESTING)
+  find_package(ament_cmake_pytest REQUIRED)
+  ament_add_pytest_test(motion_modules test/test_motion_modules.py)
+endif()
+
 ament_package()
