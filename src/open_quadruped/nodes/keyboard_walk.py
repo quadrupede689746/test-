@@ -94,9 +94,12 @@ class KeyboardWalk(Node):
         self.create_subscription(String, '/robot_logger/safety_stop', self._safety_stop, 10)
         self.contacts = {leg: None for leg in LEGS}
         self.safety = SafetyMonitor()
+        self.last_safety_state = SafetyState.OK
         self.stable_since = None
         self.last_pitch = None
+        self.last_imu_pitch = None
         self.last_base_z = None
+        self.stable_reference = None
         self.stable_ready = False
         self.base_xyz = None
         self.base_rotation = None
@@ -179,31 +182,53 @@ class KeyboardWalk(Node):
         sinr = 2.0 * (q.w*q.x + q.y*q.z)
         cosr = 1.0 - 2.0 * (q.x*q.x + q.y*q.y)
         roll = math.atan2(sinr, cosr)
-        contacts = {leg: value is True for leg, value in self.contacts.items()}
+        contacts = ({leg: value is True for leg, value in self.contacts.items()}
+                    if self.home is not None and all(value is not None for value in self.contacts.values())
+                    else None)
+        if contacts is not None and self.motion_started is not None:
+            gait_elapsed = (self.get_clock().now() - self.motion_started).nanoseconds / 1e9
+            for expected_swing in swing_legs(gait_elapsed, self.cycle_duration, self.gait, self.swing_fraction):
+                contacts[expected_swing] = True
+        self.last_imu_pitch = pitch
         state = self.safety.evaluate(roll=roll, pitch=pitch,
             angular_speed=float(np.linalg.norm([msg.angular_velocity.x, msg.angular_velocity.y])),
-            contacts=contacts if all(value is not None for value in self.contacts.values()) else None)
+            contacts=contacts)
+        changed = state != self.last_safety_state
+        self.last_safety_state = state
         if state is SafetyState.FALL:
             self.vx = self.vy = self.yaw = 0.0
             self.motion_started = None
-            self.get_logger().fatal(f'FALL detected by /imu (roll={roll:.3f}, pitch={pitch:.3f}); movement locked.')
-        elif state is SafetyState.WARNING and (abs(roll) > .25 or abs(pitch) > .25):
+            if changed:
+                self.get_logger().fatal(f'FALL detected by /imu (roll={roll:.3f}, pitch={pitch:.3f}); movement locked.')
+        elif state is SafetyState.WARNING:
             self.vx = self.vy = self.yaw = 0.0
             self.motion_started = None
-            self.get_logger().error('WARNING from /imu; stopping gait and returning to stand pose.')
+            if changed:
+                self.get_logger().error('WARNING from safety monitor; stopping gait and returning to stand pose.')
             if self.home is not None:
                 self._publish(self._home_output(), 1.0)
 
     def _is_stable(self):
-        ready = (self.home is not None and self.last_pitch is not None and self.last_base_z is not None
-                 and abs(self.last_pitch) < .12 and all(v is True for v in self.contacts.values()))
+        ready = (self.home is not None and self.last_imu_pitch is not None
+                 and self.last_base_z is not None and abs(self.last_imu_pitch) < .12
+                 and all(v is True for v in self.contacts.values()))
         now = time.monotonic()
         if ready:
             if self.stable_since is None:
                 self.stable_since = now
-            self.stable_ready = now - self.stable_since >= 2.0
+                self.stable_reference = (self.last_base_z, self.last_imu_pitch)
+            z_ref, pitch_ref = self.stable_reference
+            stable_window = (abs(self.last_base_z - z_ref) < .005
+                             and abs(self.last_imu_pitch - pitch_ref) < .02)
+            if stable_window:
+                self.stable_ready = now - self.stable_since >= 2.0
+            else:
+                self.stable_since = now
+                self.stable_reference = (self.last_base_z, self.last_imu_pitch)
+                self.stable_ready = False
         else:
             self.stable_since = None
+            self.stable_reference = None
             self.stable_ready = False
         return self.stable_ready
 
@@ -523,7 +548,7 @@ class KeyboardWalk(Node):
                 request = SetModelState.Request(); request.model_state = state
                 self.reset_client.call_async(request)
                 self._publish(BENT_START_POSE, 1.0)
-                self.stable_since = None; self.stable_ready = False
+                self.stable_since = None; self.stable_reference = None; self.stable_ready = False
                 self.get_logger().warning('Gazebo base reset requested; waiting for stable stand before movement.')
         elif key in ('x', 'X'):
             self.vx = self.vy = self.yaw = 0.0
