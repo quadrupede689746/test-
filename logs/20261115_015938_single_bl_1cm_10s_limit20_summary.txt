@@ -1,0 +1,8 @@
+trial=20261115_015938_single_bl_1cm_10s_limit20
+samples=1053
+first_anomaly=tracking_error; t=17.500000; joint=motor_front_left_upper_leg; detail=command=0.0111, measured=0.3198, error=-0.3088 rad; probable=controller cannot track the requested trajectory
+first_tracking_error=t=17.500000; joint=motor_front_left_upper_leg; command=0.0111, measured=0.3198, error=-0.3088 rad
+first_effort_saturation=t=17.500000; joint=motor_front_left_upper_leg; effort=-20.0000 Nm, limit=20.0000 Nm
+first_fall=t=17.500000; joint=none; z=0.3735, roll=0.5153, pitch=1.2638
+first_joint_speed=t=17.600000; joint=motor_front_left_upper_leg; velocity=-86.1487 rad/s
+first_foot_contact_loss=t=17.600000; joint=none; front_left contact lost

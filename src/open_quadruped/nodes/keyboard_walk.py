@@ -17,6 +17,7 @@ from ament_index_python.packages import get_package_share_directory
 from rclpy.node import Node
 from rclpy.parameter import Parameter
 from sensor_msgs.msg import JointState
+from std_msgs.msg import String
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 
 
@@ -209,6 +210,8 @@ class KeyboardWalk(Node):
         self.publisher = self.create_publisher(
             JointTrajectory, str(self.get_parameter('trajectory_topic').value), 10
         )
+        self.status_publisher = self.create_publisher(String, '/keyboard_walk/status', 10)
+        self.create_subscription(String, '/robot_logger/safety_stop', self._safety_stop, 10)
         self.joint_state = None
         self.create_subscription(
             JointState, str(self.get_parameter('joint_states_topic').value),
@@ -226,6 +229,23 @@ class KeyboardWalk(Node):
             1.0 / float(self.get_parameter('publish_rate_hz').value), self._tick
         )
         self.get_logger().info('URDF parsed; waiting for complete /joint_states feedback.')
+
+    def _publish_status(self, key):
+        status = (f'key={key};vx={self.vx * self.speed_scale:.4f};'
+                  f'vy={self.vy * self.speed_scale:.4f};'
+                  f'yaw={self.yaw * self.speed_scale:.4f};gait={self.gait};'
+                  f'step_length_m={self.step_length:.4f};'
+                  f'swing_height_m={self.swing_height:.4f};'
+                  f'cycle_duration_sec={self.cycle_duration:.3f}')
+        self.status_publisher.publish(String(data=status))
+
+    def _safety_stop(self, msg):
+        self.vx = self.vy = self.yaw = 0.0
+        self.motion_started = None
+        self.get_logger().error(f'Safety stop from robot_logger: {msg.data}; commanding stand pose.')
+        if self.home is not None:
+            self._publish(self._home_output(), 1.0)
+        self._publish_status(f'safety_stop:{msg.data}')
 
     def _on_joint_state(self, msg):
         positions = dict(zip(msg.name, msg.position))
@@ -438,6 +458,7 @@ class KeyboardWalk(Node):
         elif key in ('g', 'G'):
             self.gait = 'trot' if self.gait == 'crawl' else 'crawl'
             self.get_logger().info(f'Gait set to {self.gait}. Crawl is the safer default.')
+        self._publish_status(key if key != ' ' else 'space')
 
 
 def read_key():

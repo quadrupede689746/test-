@@ -1,0 +1,8 @@
+trial=20261115_020413_crawl_keyboard_2mm_10mm
+samples=1931
+first_anomaly=effort_saturation; t=86.500000; joint=motor_front_right_upper_leg; detail=effort=-4.0000 Nm, limit=4.0000 Nm; probable=measured actuator effort reached configured limit
+first_effort_saturation=t=86.500000; joint=motor_front_right_upper_leg; effort=-4.0000 Nm, limit=4.0000 Nm
+first_joint_speed=t=86.600000; joint=motor_front_left_upper_leg; velocity=-30.4495 rad/s
+first_foot_contact_loss=t=86.600000; joint=none; front_left contact lost
+first_fall=t=86.800000; joint=none; z=0.9479, roll=-0.3913, pitch=0.8816
+first_tracking_error=t=87.100000; joint=motor_front_left_lower_leg; command=0.3611, measured=0.6998, error=-0.3387 rad

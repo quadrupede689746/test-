@@ -1,0 +1,3 @@
+trial=20261115_015200_static_verified
+samples=1281
+first_anomaly=none detected

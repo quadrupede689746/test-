@@ -1,0 +1,8 @@
+trial=20261115_020651_stance_bend_1cm_10s_limit4
+samples=591
+first_anomaly=tracking_error; t=25.200000; joint=motor_front_left_upper_leg; detail=command=0.1181, measured=0.4346, error=-0.3165 rad; probable=controller cannot track the requested trajectory
+first_tracking_error=t=25.200000; joint=motor_front_left_upper_leg; command=0.1181, measured=0.4346, error=-0.3165 rad
+first_effort_saturation=t=25.200000; joint=motor_front_left_upper_leg; effort=-4.0000 Nm, limit=4.0000 Nm
+first_fall=t=25.300000; joint=none; z=0.4277, roll=2.4989, pitch=0.7975
+first_joint_speed=t=25.300000; joint=motor_front_left_hip; velocity=-59.5129 rad/s
+first_foot_contact_loss=t=25.300000; joint=none; front_left contact lost

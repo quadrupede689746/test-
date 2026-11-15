@@ -51,6 +51,7 @@
       <inertial>
         <mass value="${mass}" />
         <origin rpy="${i_rpy}" xyz="${i_xyz}" /> <!-- Inertial Axes -->
+        <!-- Solid rectangular-box tensor about the declared inertial origin. -->
         <inertia ixx="${mass * (width * width + height * height)/12.0}" ixy="${0}" ixz="${0}" iyx="${0}" iyy="${mass * (length * length + height * height)/12.0}" iyz="${0}" izx="${0}" izy="${0}" izz="${mass * (length * length + width * width)/12.0}" />
       </inertial>
     </link>
@@ -96,13 +97,27 @@
       <inertial>
         <mass value="${mass}" />
         <origin rpy="${i_rpy}" xyz="${i_xyz}" /> <!-- Inertial Axes -->
-        <inertia ixx="${mass * (width * width + height * height)/12.0}" ixy="${0}" ixz="${0}" iyx="${0}" iyy="${mass * (length * length + height * height)/12.0}" iyz="${0}" izx="${0}" izy="${0}" izz="${mass * (length * length + width * width)/12.0}" />
+        <!-- Spherical collision geometry: I = 2/5 m r^2 on all axes. -->
+        <inertia ixx="${2.0 * mass * radius * radius / 5.0}" ixy="${0}" ixz="${0}" iyx="${0}" iyy="${2.0 * mass * radius * radius / 5.0}" iyz="${0}" izx="${0}" izy="${0}" izz="${2.0 * mass * radius * radius / 5.0}" />
       </inertial>
     </link>
 
     <gazebo reference="${name}">
       <!-- Gravity is restored after ros2_control has latched the startup pose. -->
       <gravity>false</gravity>
+      <sensor name="${name}_contact_sensor" type="contact">
+        <always_on>true</always_on>
+        <update_rate>25</update_rate>
+        <contact>
+          <collision>${name.replace('_foot', '_lower_leg_fixed_joint_lump__' + name + '_collision_1')}</collision>
+        </contact>
+        <plugin name="${name}_contact_plugin" filename="libgazebo_ros_bumper.so">
+          <ros>
+            <namespace>/foot_contacts/${name}</namespace>
+          </ros>
+          <frame_name>${name}</frame_name>
+        </plugin>
+      </sensor>
       <kp>10000.0</kp>
       <kd>10.0</kd>
       <mu1>0.8</mu1>

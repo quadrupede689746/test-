@@ -28,6 +28,14 @@ def launch_setup(context, *args, **kwargs):
     # --------------------------------------------------
 
     package_share = get_package_share_directory('open_quadruped')
+    initial_joint_positions_raw = LaunchConfiguration(
+        'initial_joint_positions'
+    ).perform(context)
+    initial_joint_positions = [
+        float(value) for value in initial_joint_positions_raw.split(',')
+    ]
+    if len(initial_joint_positions) != 12:
+        raise ValueError('initial_joint_positions must contain 12 comma-separated values.')
 
     xacro_file = os.path.join(
         package_share,
@@ -103,9 +111,7 @@ def launch_setup(context, *args, **kwargs):
             '-entity', 'open_quadruped',
             '-x', '0.0',
             '-y', '0.0',
-            # At the all-zero joint pose, FK puts the foot-sphere centers at
-            # z=-0.2222 m relative to base_link; 0.245 m gives ~3 mm clearance.
-            '-z', '0.245',
+            '-z', LaunchConfiguration('spawn_z'),
         ],
     )
 
@@ -176,6 +182,16 @@ def launch_setup(context, *args, **kwargs):
         ],
         output='screen',
     )
+    place_bent_stance = Node(
+        package='open_quadruped',
+        executable='place_bent_stance.py',
+        name='place_bent_stance',
+        output='screen',
+        condition=IfCondition(LaunchConfiguration('place_initial_stance')),
+        parameters=[{
+            'joint_positions': initial_joint_positions,
+        }],
+    )
     load_quadruped_controller = Node(
         package='controller_manager',
         executable='spawner',
@@ -208,7 +224,9 @@ def launch_setup(context, *args, **kwargs):
         output='screen',
         parameters=[{
             'model_name': 'open_quadruped',
-            'settle_delay_sec': 1.0,
+            'settle_delay_sec': ParameterValue(
+                LaunchConfiguration('gravity_settle_delay_sec'), value_type=float
+            ),
         }],
     )
 
@@ -218,6 +236,7 @@ def launch_setup(context, *args, **kwargs):
         joy_node,
         interface_node,
         trajectory_bridge,
+        place_bent_stance,
 
         RegisterEventHandler(
             OnProcessExit(
@@ -318,6 +337,23 @@ def generate_launch_description():
             'joy_device_id',
             default_value='0',
             description='Joystick device index.',
+        ),
+        DeclareLaunchArgument(
+            'spawn_z', default_value='0.245',
+            description='Initial base_link height in Gazebo.',
+        ),
+        DeclareLaunchArgument(
+            'gravity_settle_delay_sec', default_value='1.0',
+            description='Delay after controller activation before enabling gravity.',
+        ),
+        DeclareLaunchArgument(
+            'initial_joint_positions',
+            default_value='0,0,0,0,0,0,0,0,0,0,0,0',
+            description='12 comma-separated initial joint positions in controller order.',
+        ),
+        DeclareLaunchArgument(
+            'place_initial_stance', default_value='false',
+            description='Lower base after initial joint positions settle.',
         ),
 
         gazebo,

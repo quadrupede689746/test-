@@ -1,0 +1,8 @@
+trial=20261115_015742_single_bl_1cm_10s_limit10
+samples=1376
+first_anomaly=effort_saturation; t=19.700000; joint=motor_front_left_upper_leg; detail=effort=-10.0000 Nm, limit=10.0000 Nm; probable=measured actuator effort reached configured limit
+first_effort_saturation=t=19.700000; joint=motor_front_left_upper_leg; effort=-10.0000 Nm, limit=10.0000 Nm
+first_fall=t=19.800000; joint=none; z=0.3003, roll=-1.3389, pitch=1.3402
+first_joint_speed=t=19.800000; joint=motor_front_left_upper_leg; velocity=-115.9580 rad/s
+first_tracking_error=t=19.800000; joint=motor_front_left_lower_leg; command=-0.0020, measured=0.7451, error=-0.7471 rad
+first_foot_contact_loss=t=19.800000; joint=none; front_left contact lost

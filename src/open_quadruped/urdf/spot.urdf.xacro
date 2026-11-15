@@ -140,7 +140,7 @@
   <xacro:mesh_link name="front_left_upper_leg"
               origin_rpy="0 0 ${pi/2}" origin_xyz="${-0.252} ${-0.05} ${-0.055}"
               i_rpy="0 0 0" i_xyz="-0.005 0.0175 -0.055"
-              mass="0.13"
+              mass="0.10"
               c_xyz="0 0.02 -0.05"
               length="0.035"
               width="0.035"
@@ -161,7 +161,7 @@
   <xacro:mesh_link name="front_left_lower_leg"
               origin_rpy="0 0 ${pi/2}" origin_xyz="${-0.247} ${-0.068} ${0.0535}"
               i_rpy="0 0 0" i_xyz="-0.01 0 -0.06"
-              mass="0.05"
+              mass="0.10"
               c_xyz="0 0 -0.06"
               length="0.035"
               width="0.035"
@@ -182,7 +182,7 @@
   <xacro:mesh_link_sphere name="front_left_foot"
               origin_rpy="0 0 ${pi/2}" origin_xyz="${-0.247} ${-0.068} ${0.18}"
               i_rpy="0 0 0" i_xyz="0 0 0"
-              mass="0.005"
+              mass="0.03"
               c_xyz="${-0.247} ${-0.068} ${0.18}"
               length="0.05"
               width="0.065"
@@ -221,7 +221,7 @@
   <xacro:mesh_link name="back_left_upper_leg"
               origin_rpy="0 0 ${pi/2}" origin_xyz="${-0.252} ${-0.05} ${-0.055}"
               i_rpy="0 0 0" i_xyz="-0.005 0.0175 -0.055"
-              mass="0.13"
+              mass="0.10"
               c_xyz="0 0.02 -0.05"
               length="0.035"
               width="0.035"
@@ -242,7 +242,7 @@
   <xacro:mesh_link name="back_left_lower_leg"
               origin_rpy="0 0 ${pi/2}" origin_xyz="${-0.247} ${-0.068} ${0.0535}"
               i_rpy="0 0 0" i_xyz="-0.01 0 -0.06"
-              mass="0.05"
+              mass="0.10"
               c_xyz="0 0 -0.06"
               length="0.035"
               width="0.035"
@@ -263,7 +263,7 @@
   <xacro:mesh_link_sphere name="back_left_foot"
               origin_rpy="0 0 ${pi/2}" origin_xyz="${-0.247} ${-0.068} ${0.18}"
               i_rpy="0 0 0" i_xyz="0 0 0"
-              mass="0.005"
+              mass="0.03"
               c_xyz="${-0.247} ${-0.068} ${0.18}"
               length="0.05"
               width="0.065"
@@ -302,7 +302,7 @@
   <xacro:mesh_link name="front_right_upper_leg"
               origin_rpy="0 0 ${pi/2}" origin_xyz="${-0.252} ${0.12} ${-0.055}"
               i_rpy="0 0 0" i_xyz="-0.005 -0.0175 -0.055"
-              mass="0.13"
+              mass="0.10"
               c_xyz="0 ${-0.02} -0.05"
               length="0.035"
               width="0.035"
@@ -323,7 +323,7 @@
   <xacro:mesh_link name="front_right_lower_leg"
               origin_rpy="0 0 ${pi/2}" origin_xyz="${-0.247} ${0.138} ${0.0535}"
               i_rpy="0 0 0" i_xyz="-0.01 0 -0.06"
-              mass="0.05"
+              mass="0.10"
               c_xyz="0 0 -0.06"
               length="0.035"
               width="0.035"
@@ -344,7 +344,7 @@
   <xacro:mesh_link_sphere name="front_right_foot"
               origin_rpy="0 0 ${pi/2}" origin_xyz="${-0.247} ${0.138} ${0.18}"
               i_rpy="0 0 0" i_xyz="0 0 0"
-              mass="0.005"
+              mass="0.03"
               c_xyz="${-0.247} ${0.138} ${0.18}"
               length="0.05"
               width="0.065"
@@ -383,7 +383,7 @@
   <xacro:mesh_link name="back_right_upper_leg"
               origin_rpy="0 0 ${pi/2}" origin_xyz="${-0.252} ${0.12} ${-0.055}"
               i_rpy="0 0 0" i_xyz="-0.005 -0.0175 -0.055"
-              mass="0.13"
+              mass="0.10"
               c_xyz="0 ${-0.02} -0.05"
               length="0.035"
               width="0.035"
@@ -404,7 +404,7 @@
   <xacro:mesh_link name="back_right_lower_leg"
               origin_rpy="0 0 ${pi/2}" origin_xyz="${-0.247} ${0.138} ${0.0535}"
               i_rpy="0 0 0" i_xyz="-0.01 0 -0.06"
-              mass="0.05"
+              mass="0.10"
               c_xyz="0 0 -0.06"
               length="0.035"
               width="0.035"
@@ -425,7 +425,7 @@
   <xacro:mesh_link_sphere name="back_right_foot"
               origin_rpy="0 0 ${pi/2}" origin_xyz="${-0.247} ${0.138} ${0.18}"
               i_rpy="0 0 0" i_xyz="0 0 0"
-              mass="0.005"
+              mass="0.03"
               c_xyz="${-0.247} ${0.138} ${0.18}"
               length="0.05"
               width="0.065"
@@ -482,61 +482,73 @@
       <command_interface name="position"/>
       <state_interface name="position"/>
       <state_interface name="velocity"/>
+      <state_interface name="effort"/>
     </joint>
     <joint name="motor_front_left_upper_leg">
       <command_interface name="position"/>
       <state_interface name="position"/>
       <state_interface name="velocity"/>
+      <state_interface name="effort"/>
     </joint>
     <joint name="motor_front_left_lower_leg">
       <command_interface name="position"/>
       <state_interface name="position"/>
       <state_interface name="velocity"/>
+      <state_interface name="effort"/>
     </joint>
     <joint name="motor_front_right_hip">
       <command_interface name="position"/>
       <state_interface name="position"/>
       <state_interface name="velocity"/>
+      <state_interface name="effort"/>
     </joint>
     <joint name="motor_front_right_upper_leg">
       <command_interface name="position"/>
       <state_interface name="position"/>
       <state_interface name="velocity"/>
+      <state_interface name="effort"/>
     </joint>
     <joint name="motor_front_right_lower_leg">
       <command_interface name="position"/>
       <state_interface name="position"/>
       <state_interface name="velocity"/>
+      <state_interface name="effort"/>
     </joint>
     <joint name="motor_back_left_hip">
       <command_interface name="position"/>
       <state_interface name="position"/>
       <state_interface name="velocity"/>
+      <state_interface name="effort"/>
     </joint>
     <joint name="motor_back_left_upper_leg">
       <command_interface name="position"/>
       <state_interface name="position"/>
       <state_interface name="velocity"/>
+      <state_interface name="effort"/>
     </joint>
     <joint name="motor_back_left_lower_leg">
       <command_interface name="position"/>
       <state_interface name="position"/>
       <state_interface name="velocity"/>
+      <state_interface name="effort"/>
     </joint>
     <joint name="motor_back_right_hip">
       <command_interface name="position"/>
       <state_interface name="position"/>
       <state_interface name="velocity"/>
+      <state_interface name="effort"/>
     </joint>
     <joint name="motor_back_right_upper_leg">
       <command_interface name="position"/>
       <state_interface name="position"/>
       <state_interface name="velocity"/>
+      <state_interface name="effort"/>
     </joint>
     <joint name="motor_back_right_lower_leg">
       <command_interface name="position"/>
       <state_interface name="position"/>
       <state_interface name="velocity"/>
+      <state_interface name="effort"/>
     </joint>
   </ros2_control>
 

@@ -1,0 +1,5 @@
+trial=20261115_033102_bent_stance_mass_erp010
+samples=3474
+first_anomaly=foot_contact_loss; t=2.000000; joint=none; detail=back_left contact lost; probable=foot unloaded or lost ground contact
+first_foot_contact_loss=t=2.000000; joint=none; back_left contact lost
+first_tracking_error=t=23.700000; joint=motor_front_left_lower_leg; command=1.2661, measured=1.5709, error=-0.3049 rad

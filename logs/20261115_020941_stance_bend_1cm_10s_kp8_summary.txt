@@ -1,0 +1,8 @@
+trial=20261115_020941_stance_bend_1cm_10s_kp8
+samples=267
+first_anomaly=effort_saturation; t=17.100000; joint=motor_front_left_upper_leg; detail=effort=-4.0000 Nm, limit=4.0000 Nm; probable=measured actuator effort reached configured limit
+first_effort_saturation=t=17.100000; joint=motor_front_left_upper_leg; effort=-4.0000 Nm, limit=4.0000 Nm
+first_joint_speed=t=17.200000; joint=motor_front_left_upper_leg; velocity=-203.8531 rad/s
+first_tracking_error=t=17.200000; joint=motor_front_left_upper_leg; command=0.0033, measured=0.3850, error=-0.3817 rad
+first_fall=t=17.200000; joint=none; z=0.8233, roll=-1.7208, pitch=-1.1267
+first_foot_contact_loss=t=17.200000; joint=none; front_left contact lost

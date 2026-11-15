@@ -16,6 +16,11 @@ install(PROGRAMS
   nodes/trajectory_to_effort.py
   nodes/enable_robot_gravity.py
   nodes/keyboard_walk.py
+  nodes/robot_logger.py
+  nodes/analyze_log.py
+  nodes/single_foot_test.py
+  nodes/stance_bend_test.py
+  nodes/place_bent_stance.py
   nodes/keyboard_foot_control.py
   nodes/crawl_gait_coordinator.py
   DESTINATION lib/${PROJECT_NAME}
