@@ -11,8 +11,8 @@ import numpy as np
 import rclpy
 from ament_index_python.packages import get_package_share_directory
 from gazebo_msgs.msg import ContactsState
-from gazebo_msgs.msg import ModelStates, ModelState
-from gazebo_msgs.srv import SetModelState
+from gazebo_msgs.msg import ModelStates, EntityState
+from gazebo_msgs.srv import SetEntityState
 from kinematics import UrdfLegKinematics, FOOT_LINKS, LEGS
 from keyboard_input import read_key
 from safety_monitor import SafetyMonitor, SafetyState
@@ -119,7 +119,7 @@ class KeyboardWalk(Node):
         self.create_subscription(ModelStates, '/gazebo/model_states',
                                  self._on_model_states, 10)
         self.create_subscription(Imu, '/imu', self._on_imu, 10)
-        self.reset_client = self.create_client(SetModelState, '/gazebo/set_model_state')
+        self.reset_client = self.create_client(SetEntityState, '/gazebo/set_entity_state')
         self.home = None
         self.home_feet = None
         self.last_output = None
@@ -517,6 +517,18 @@ class KeyboardWalk(Node):
             return
         self._publish(output)
 
+
+    def _on_reset_result(self, future):
+        try:
+            response = future.result()
+        except Exception as exc:
+            self.get_logger().error(f'Gazebo reset service failed: {exc}')
+            return
+        if response.success:
+            self.get_logger().info('Gazebo base reset succeeded (service returned success=True).')
+        else:
+            self.get_logger().error('Gazebo base reset was rejected (service returned success=False).')
+
     def handle_key(self, key):
         if key in ('w', 's', 'a', 'd', 'q', 'e') and not self._is_stable():
             self.get_logger().warning(
@@ -539,14 +551,15 @@ class KeyboardWalk(Node):
             self.vx = self.vy = self.yaw = 0.0
             self.motion_started = None
             if not self.reset_client.wait_for_service(timeout_sec=0.2):
-                self.get_logger().error('Reset unavailable: /gazebo/set_model_state is not active.')
+                self.get_logger().error('Reset unavailable: /gazebo/set_entity_state is not active.')
             else:
-                state = ModelState()
-                state.model_name = 'open_quadruped'
+                state = EntityState()
+                state.name = 'open_quadruped'
                 state.pose.position.z = 0.22
                 state.pose.orientation.w = 1.0
-                request = SetModelState.Request(); request.model_state = state
-                self.reset_client.call_async(request)
+                request = SetEntityState.Request(); request.state = state
+                future = self.reset_client.call_async(request)
+                future.add_done_callback(self._on_reset_result)
                 self._publish(BENT_START_POSE, 1.0)
                 self.stable_since = None; self.stable_reference = None; self.stable_ready = False
                 self.get_logger().warning('Gazebo base reset requested; waiting for stable stand before movement.')
