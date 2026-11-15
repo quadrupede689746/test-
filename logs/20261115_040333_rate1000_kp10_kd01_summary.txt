@@ -1,0 +1,3 @@
+trial=20261115_040333_rate1000_kp10_kd01
+samples=3230
+first_anomaly=none detected

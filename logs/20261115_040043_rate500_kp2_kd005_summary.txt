@@ -1,0 +1,4 @@
+trial=20261115_040043_rate500_kp2_kd005
+samples=2246
+first_anomaly=tracking_error; t=25.700000; joint=motor_front_left_lower_leg; detail=command=1.2661, measured=1.5709, error=-0.3048 rad; probable=controller cannot track the requested trajectory
+first_tracking_error=t=25.700000; joint=motor_front_left_lower_leg; command=1.2661, measured=1.5709, error=-0.3048 rad
