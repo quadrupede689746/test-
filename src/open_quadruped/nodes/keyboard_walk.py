@@ -15,6 +15,7 @@ import numpy as np
 import rclpy
 from ament_index_python.packages import get_package_share_directory
 from gazebo_msgs.msg import ContactsState
+from gazebo_msgs.msg import ModelStates
 from rclpy.node import Node
 from rclpy.parameter import Parameter
 from sensor_msgs.msg import JointState
@@ -227,12 +228,11 @@ class KeyboardWalk(Node):
         self.declare_parameter('joint_states_topic', '/joint_states')
         self.declare_parameter('cycle_duration_sec', 24.0)
         self.declare_parameter('step_length_m', 0.005)
-        self.declare_parameter('swing_height_m', 0.05)
+        self.declare_parameter('swing_height_m', 0.03)
         self.declare_parameter('swing_fraction', 0.125)
-        # The previous crawl trial's command-frame margin overestimated the
-        # margin from measured foot/COM positions by ~15 mm. Keep extra planned
-        # margin and gate liftoff using the measured support contacts below.
-        self.declare_parameter('support_margin_m', 0.04)
+        # Transfer toward a 25 mm margin, while requiring at least 22 mm from
+        # the measured feet and COM before the next foot leaves the floor.
+        self.declare_parameter('support_margin_m', 0.025)
         self.declare_parameter('minimum_support_margin_m', 0.022)
         self.declare_parameter('start_pose_tolerance_rad', 0.08)
         self.declare_parameter('publish_rate_hz', 30.0)
@@ -261,6 +261,13 @@ class KeyboardWalk(Node):
         self.status_publisher = self.create_publisher(String, '/keyboard_walk/status', 10)
         self.create_subscription(String, '/robot_logger/safety_stop', self._safety_stop, 10)
         self.contacts = {leg: None for leg in LEGS}
+        self.base_xyz = None
+        self.base_rotation = None
+        self.base_yaw = None
+        self.start_feet_world = None
+        self.stride_world = None
+        self.start_world_xyz = None
+        self.start_world_rotation = None
         self.contact_subs = [self.create_subscription(
             ContactsState, f'/foot_contacts/{FOOT_LINKS[leg]}/bumper_states',
             lambda msg, leg=leg: self._contact_cb(leg, msg), 10) for leg in LEGS]
@@ -269,6 +276,8 @@ class KeyboardWalk(Node):
             JointState, str(self.get_parameter('joint_states_topic').value),
             self._on_joint_state, 10,
         )
+        self.create_subscription(ModelStates, '/gazebo/model_states',
+                                 self._on_model_states, 10)
         self.home = None
         self.home_feet = None
         self.last_output = None
@@ -303,34 +312,58 @@ class KeyboardWalk(Node):
     def _contact_cb(self, leg, msg):
         self.contacts[leg] = bool(msg.states)
 
+    def _on_model_states(self, msg):
+        try:
+            index = msg.name.index('open_quadruped')
+        except ValueError:
+            return
+        pose = msg.pose[index]
+        self.base_xyz = np.array([pose.position.x, pose.position.y, pose.position.z])
+        q = pose.orientation
+        x, y, z, w = q.x, q.y, q.z, q.w
+        self.base_rotation = np.array([
+            [1 - 2*(y*y + z*z), 2*(x*y - z*w), 2*(x*z + y*w)],
+            [2*(x*y + z*w), 1 - 2*(x*x + z*z), 2*(y*z - x*w)],
+            [2*(x*z - y*w), 2*(y*z + x*w), 1 - 2*(x*x + y*y)],
+        ])
+        self.base_yaw = math.atan2(self.base_rotation[1, 0],
+                                   self.base_rotation[0, 0])
+        self._initialize_home_if_ready()
+
     def _on_joint_state(self, msg):
         positions = dict(zip(msg.name, msg.position))
         if all(name in positions for name in JOINT_NAMES):
             self.joint_state = {name: float(positions[name]) for name in JOINT_NAMES}
-            if self.home is None:
-                measured = [self.joint_state[name] for name in JOINT_NAMES]
-                pose_error = max(abs(a - b) for a, b in zip(measured, BENT_START_POSE))
-                if pose_error > self.start_pose_tolerance and not self.start_pose_commanded:
-                    self.get_logger().info(
-                        f'Moving to validated bent start pose (max initial joint error '
-                        f'{pose_error:.3f} rad) before enabling keyboard walking.'
-                    )
-                    self.start_pose_commanded = True
-                    self._publish(BENT_START_POSE, 10.0)
-                    return
-                if pose_error > self.start_pose_tolerance:
-                    return
-                self.home = {leg: [self.joint_state[name] for name in self.kinematics.chains[leg][1]]
-                             for leg in LEGS}
-                self.home_feet = {
-                    leg: self.kinematics.fk(leg, self.home[leg]) for leg in LEGS
-                }
-                self.last_output = {
-                    name: self.joint_state[name] for name in JOINT_NAMES
-                }
-                self.get_logger().info(
-                    'Validated bent start pose reached; keyboard walking is ready.'
-                )
+            self._initialize_home_if_ready()
+
+    def _initialize_home_if_ready(self):
+        if self.home is not None or self.joint_state is None or self.base_xyz is None:
+            return
+        measured = [self.joint_state[name] for name in JOINT_NAMES]
+        pose_error = max(abs(a - b) for a, b in zip(measured, BENT_START_POSE))
+        if pose_error > self.start_pose_tolerance and not self.start_pose_commanded:
+            self.get_logger().info(
+                f'Moving to validated bent start pose (max initial joint error '
+                f'{pose_error:.3f} rad) before enabling keyboard walking.'
+            )
+            self.start_pose_commanded = True
+            self._publish(BENT_START_POSE, 10.0)
+            return
+        if pose_error > self.start_pose_tolerance:
+            return
+        self.home = {leg: [self.joint_state[name] for name in self.kinematics.chains[leg][1]]
+                     for leg in LEGS}
+        self.home_feet = {
+            leg: self.kinematics.fk(leg, self.home[leg]) for leg in LEGS
+        }
+        self.home_feet_world = {
+            leg: self.base_xyz + self.base_rotation @ self.home_feet[leg]
+            for leg in LEGS
+        }
+        self.last_output = {name: self.joint_state[name] for name in JOINT_NAMES}
+        self.get_logger().info(
+            'Validated bent start pose reached; world-frame foot anchoring is ready.'
+        )
 
     def _home_output(self):
         return [value for leg in LEGS for value in self.home[leg]]
@@ -462,8 +495,7 @@ class KeyboardWalk(Node):
             for other in LEGS:
                 if other == leg:
                     continue
-                dx, dy, _ = self._leg_offset(other, elapsed)
-                support_points.append(self.home_feet[other][:2] + np.array([dx, dy]))
+                support_points.append(self._measured_foot_xy(other))
             candidates.append((blend, self._support_translation(
                 support_points, margin_m=self.support_margin,
                 com_xy=self.kinematics.com_xy_at(self.joint_state)
@@ -492,7 +524,8 @@ class KeyboardWalk(Node):
             self.last_output = dict(zip(JOINT_NAMES, map(float, positions)))
 
     def _tick(self):
-        if self.home is None or self.home_feet is None:
+        if (self.home is None or self.home_feet is None
+                or self.base_xyz is None or self.base_rotation is None):
             return
         if self.vx == 0.0 and self.vy == 0.0 and self.yaw == 0.0:
             # The trajectory bridge already holds the start pose. Avoid
@@ -503,6 +536,27 @@ class KeyboardWalk(Node):
 
         if self.motion_started is None:
             self.motion_started = self.get_clock().now()
+            self.start_feet_world = {
+                leg: self.base_xyz + self.base_rotation @ self.kinematics.fk(
+                    leg, [self.joint_state[name]
+                          for name in self.kinematics.chains[leg][1]])
+                for leg in LEGS
+            }
+            self.start_world_xyz = self.base_xyz.copy()
+            self.start_world_rotation = self.base_rotation.copy()
+            self.stride_world = {}
+            for leg in LEGS:
+                side = 1.0 if leg in ('fl', 'bl') else -1.0
+                forward_drive = self.speed_scale * (self.vx - self.yaw * side * 0.5)
+                lateral_drive = self.speed_scale * self.vy
+                local_stride = np.array([
+                    math.copysign(self.step_length * abs(forward_drive), forward_drive)
+                    if forward_drive else 0.0,
+                    math.copysign(self.step_length * abs(lateral_drive), lateral_drive)
+                    if lateral_drive else 0.0,
+                    0.0,
+                ])
+                self.stride_world[leg] = self.start_world_rotation @ local_stride
         elapsed = (self.get_clock().now() - self.motion_started).nanoseconds / 1e9
         cycle_phase = (elapsed / self.cycle_duration) % 1.0
         balance_shift = self._balance_shift(cycle_phase, elapsed)
@@ -538,27 +592,54 @@ class KeyboardWalk(Node):
                 )
                 self._publish(self._home_output(), 0.5)
                 return
-        output = []
-        try:
-            for leg in LEGS:
-                dx, dy, lift = self._leg_offset(leg, elapsed)
-                phase = (cycle_phase + (CRAWL_OFFSETS if self.gait == 'crawl'
-                                        else TROT_OFFSETS)[leg]) % 1.0
-                if phase >= 1.0 - self.swing_fraction:
-                    progress = (phase - (1.0 - self.swing_fraction)) / self.swing_fraction
-                    blend = math.sin(math.pi * progress) ** 2
-                    dx += SWING_CLEARANCE_XY[leg][0] * blend
-                    dy += SWING_CLEARANCE_XY[leg][1] * blend
-                target = self.home_feet[leg] + np.array([
-                    dx + balance_shift[0], dy + balance_shift[1],
-                    lift + balance_shift[2]
-                ])
-                names = self.kinematics.chains[leg][1]
-                seed = [self.last_output[name] for name in names]
-                output.extend(self.kinematics.ik(leg, target, seed))
-        except (ValueError, np.linalg.LinAlgError) as exc:
+        output = None
+        last_ik_error = None
+        for transfer_scale in (1.0, 0.75, 0.5, 0.25, 0.0):
+            candidate = []
+            try:
+                for leg in LEGS:
+                    leg_offset = offsets[leg]
+                    leg_cycle = math.floor(elapsed / self.cycle_duration + leg_offset)
+                    phase = (cycle_phase + leg_offset) % 1.0
+                    stride = self.stride_world[leg]
+                    target_world = (self.start_feet_world[leg] + leg_cycle * stride)
+                    lift = 0.0
+                    if phase >= 1.0 - self.swing_fraction:
+                        progress = (phase - (1.0 - self.swing_fraction)) / self.swing_fraction
+                        blend = self._smooth(progress)
+                        target_world = target_world + blend * stride
+                        swing_wave = math.sin(math.pi * progress) ** 2
+                        lift = self.swing_height * swing_wave
+                        clearance_local = np.array([
+                            SWING_CLEARANCE_XY[leg][0],
+                            SWING_CLEARANCE_XY[leg][1], 0.0,
+                        ]) * swing_wave * min(1.0, self.swing_height / 0.05)
+                        target_world = target_world + self.start_world_rotation @ clearance_local
+                    target_world = target_world + self.base_rotation @ (
+                        transfer_scale * balance_shift
+                    )
+                    target_world[2] += lift
+                    target = self.base_rotation.T @ (target_world - self.base_xyz)
+                    names = self.kinematics.chains[leg][1]
+                    seed = [self.last_output[name] for name in names]
+                    candidate.extend(self.kinematics.ik(leg, target, seed))
+                output = candidate
+                if transfer_scale < 1.0:
+                    self.get_logger().warning(
+                        f'Reduced support-transfer command to {transfer_scale:.2f} '
+                        'to keep all feet within IK limits.'
+                    )
+                break
+            except (ValueError, np.linalg.LinAlgError) as exc:
+                last_ik_error = exc
+        if output is None:
             self.vx = self.vy = self.yaw = 0.0
-            self.get_logger().error(f'Gait stopped; refusing invalid IK target: {exc}')
+            self.motion_started = None
+            self.get_logger().error(
+                f'Gait stopped; no reachable IK target after transfer reduction: '
+                f'{last_ik_error}'
+            )
+            self._publish(self._home_output(), 0.5)
             return
         self._publish(output)
 
