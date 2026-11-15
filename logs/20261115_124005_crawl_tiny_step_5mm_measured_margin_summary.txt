@@ -1,0 +1,4 @@
+trial=20261115_124005_crawl_tiny_step_5mm_measured_margin
+samples=6523
+first_anomaly=effort_saturation; t=96.300000; joint=motor_front_right_lower_leg; detail=effort=4.0000 Nm, limit=4.0000 Nm; probable=measured actuator effort reached configured limit
+first_effort_saturation=t=96.300000; joint=motor_front_right_lower_leg; effort=4.0000 Nm, limit=4.0000 Nm

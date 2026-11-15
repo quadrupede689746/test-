@@ -1,0 +1,4 @@
+trial=20261115_115728_four_leg_lift_sweep_kp20_1000hz
+samples=30817
+first_anomaly=foot_contact_loss; t=2.200000; joint=none; detail=back_right contact lost; probable=foot unloaded or lost ground contact
+first_foot_contact_loss=t=2.200000; joint=none; back_right contact lost

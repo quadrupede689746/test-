@@ -1,0 +1,4 @@
+trial=20261115_122937_crawl_tiny_step_5mm_final
+samples=15909
+first_anomaly=foot_contact_loss; t=26.200000; joint=none; detail=front_left contact lost; probable=foot unloaded or lost ground contact
+first_foot_contact_loss=t=26.200000; joint=none; front_left contact lost

@@ -7,6 +7,15 @@ from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 
 
+BENT_POSE = [
+    0.0, -0.68162889, 1.26606748,
+    0.0, -0.68162889, 1.26606748,
+    0.0, -0.68162889, 1.26606748,
+    0.0, -0.68162889, 1.26606748,
+]
+BENT_POSE_CSV = ','.join(str(value) for value in BENT_POSE)
+
+
 def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument('gui', default_value='true'),
@@ -17,6 +26,10 @@ def generate_launch_description():
             launch_arguments={
                 'gui': LaunchConfiguration('gui'),
                 'joystick_control': 'false',
+                'spawn_z': '0.245',
+                'gravity_settle_delay_sec': '20.0',
+                'initial_joint_positions': BENT_POSE_CSV,
+                'place_initial_stance': 'true',
             }.items(),
         ),
         Node(
@@ -24,6 +37,10 @@ def generate_launch_description():
             executable='joint_angles_to_trajectory.py',
             name='joint_angles_to_trajectory',
             output='screen',
-            parameters=[{'use_sim_time': True}],
+            parameters=[{
+                'use_sim_time': True,
+                'initial_joint_positions': BENT_POSE,
+                'startup_duration_sec': 10.0,
+            }],
         ),
     ])

@@ -1,0 +1,3 @@
+trial=20261115_122535_crawl_tiny_step_5mm_swing50mm
+samples=11197
+first_anomaly=none detected

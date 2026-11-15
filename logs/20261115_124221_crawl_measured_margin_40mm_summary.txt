@@ -1,0 +1,3 @@
+trial=20261115_124221_crawl_measured_margin_40mm
+samples=2721
+first_anomaly=none detected

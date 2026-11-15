@@ -1,0 +1,5 @@
+trial=20261115_123538_crawl_tiny_step_5mm_final
+samples=3136
+first_anomaly=foot_contact_loss; t=54.500000; joint=none; detail=front_left contact lost; probable=foot unloaded or lost ground contact
+first_foot_contact_loss=t=54.500000; joint=none; front_left contact lost
+first_effort_saturation=t=54.500000; joint=motor_front_right_lower_leg; effort=4.0000 Nm, limit=4.0000 Nm

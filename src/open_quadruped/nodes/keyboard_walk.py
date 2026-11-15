@@ -14,6 +14,7 @@ import xml.etree.ElementTree as ET
 import numpy as np
 import rclpy
 from ament_index_python.packages import get_package_share_directory
+from gazebo_msgs.msg import ContactsState
 from rclpy.node import Node
 from rclpy.parameter import Parameter
 from sensor_msgs.msg import JointState
@@ -29,8 +30,20 @@ JOINT_NAMES = [
     for side in ('front_left', 'front_right', 'back_left', 'back_right')
     for joint in ('hip', 'upper_leg', 'lower_leg')
 ]
+BENT_START_POSE = [
+    0.0, -0.68162889, 1.26606748,
+    0.0, -0.68162889, 1.26606748,
+    0.0, -0.68162889, 1.26606748,
+    0.0, -0.68162889, 1.26606748,
+]
 CRAWL_OFFSETS = {'fl': 0.75, 'br': 0.50, 'fr': 0.25, 'bl': 0.0}
 TROT_OFFSETS = {'fl': 0.0, 'br': 0.0, 'fr': 0.5, 'bl': 0.5}
+# Small-step swing clearance arcs from the measured 5 cm single-foot tests.
+# The offsets are zero at takeoff/touchdown and peak with the foot lift.
+SWING_CLEARANCE_XY = {
+    'fl': (0.013, 0.028), 'fr': (0.013, -0.028),
+    'bl': (-0.013, 0.052), 'br': (-0.013, -0.052),
+}
 
 
 def _origin(element):
@@ -82,35 +95,21 @@ class UrdfLegKinematics:
             child = joint.find('child').get('link')
             parent_joint[child] = joint
 
-        # Compute the nominal center of mass from the URDF inertial elements.
-        # This is used to keep the center of mass inside the three-foot support
-        # triangle before a crawl step lifts one leg.
-        transforms = {'base_link': np.eye(4)}
-        all_joints = root.findall('joint')
-        while len(transforms) < len(root.findall('link')):
-            progress = False
-            for joint in all_joints:
-                parent = joint.find('parent').get('link')
-                child = joint.find('child').get('link')
-                if parent in transforms and child not in transforms:
-                    transforms[child] = transforms[parent] @ _origin(joint.find('origin'))
-                    progress = True
-            if not progress:
-                break
-        total_mass = 0.0
-        weighted_com = np.zeros(3)
+        self.urdf_joints = root.findall('joint')
+        self.link_inertials = []
+        self.total_mass = 0.0
         for link in root.findall('link'):
             inertial = link.find('inertial')
-            if inertial is None or link.get('name') not in transforms:
+            if inertial is None:
                 continue
             mass = float(inertial.find('mass').get('value'))
-            com_transform = transforms[link.get('name')] @ _origin(inertial.find('origin'))
-            weighted_com += mass * com_transform[:3, 3]
-            total_mass += mass
-        if total_mass <= 0.0:
+            self.link_inertials.append((link.get('name'), mass,
+                                        _origin(inertial.find('origin'))))
+            self.total_mass += mass
+        if self.total_mass <= 0.0:
             raise ValueError('URDF has no positive link mass for support calculation')
-        self.com_xy = weighted_com[:2] / total_mass
-        self.total_mass = total_mass
+        self.com_xyz = self.com_xyz_at({})
+        self.com_xy = self.com_xyz[:2]
 
         self.chains = {}
         self.limits = {}
@@ -148,6 +147,40 @@ class UrdfLegKinematics:
                 axis = np.fromstring(axis_element.get('xyz', '1 0 0'), sep=' ')
                 transform = transform @ _axis_rotation(axis, values[joint.get('name')])
         return transform[:3, 3].copy()
+
+    def com_xyz_at(self, positions):
+        """Compute the full URDF mass center at the measured joint positions."""
+        transforms = {'base_link': np.eye(4)}
+        while True:
+            progress = False
+            for joint in self.urdf_joints:
+                parent = joint.find('parent').get('link')
+                child = joint.find('child').get('link')
+                if parent not in transforms or child in transforms:
+                    continue
+                transform = transforms[parent] @ _origin(joint.find('origin'))
+                if joint.get('type') == 'revolute':
+                    axis = np.fromstring(joint.find('axis').get('xyz', '1 0 0'), sep=' ')
+                    transform = transform @ _axis_rotation(
+                        axis, float(positions.get(joint.get('name'), 0.0))
+                    )
+                transforms[child] = transform
+                progress = True
+            if not progress:
+                break
+        weighted_com = np.zeros(3)
+        included_mass = 0.0
+        for name, mass, inertial_origin in self.link_inertials:
+            if name not in transforms:
+                continue
+            weighted_com += mass * (transforms[name] @ inertial_origin)[:3, 3]
+            included_mass += mass
+        if included_mass <= 0.0:
+            raise ValueError('Could not resolve URDF link transforms for COM')
+        return weighted_com / included_mass
+
+    def com_xy_at(self, positions):
+        return self.com_xyz_at(positions)[:2]
 
     def ik(self, leg, target, seed):
         """Damped least-squares IK; all geometry/limits come from the URDF."""
@@ -192,16 +225,31 @@ class KeyboardWalk(Node):
             raise RuntimeError(f'Cannot enable simulated time: {result.reason}')
         self.declare_parameter('trajectory_topic', '/quadruped_controller/joint_trajectory')
         self.declare_parameter('joint_states_topic', '/joint_states')
-        self.declare_parameter('cycle_duration_sec', 16.0)
-        self.declare_parameter('step_length_m', 0.01)
-        self.declare_parameter('swing_height_m', 0.005)
+        self.declare_parameter('cycle_duration_sec', 24.0)
+        self.declare_parameter('step_length_m', 0.005)
+        self.declare_parameter('swing_height_m', 0.05)
         self.declare_parameter('swing_fraction', 0.125)
+        # The previous crawl trial's command-frame margin overestimated the
+        # margin from measured foot/COM positions by ~15 mm. Keep extra planned
+        # margin and gate liftoff using the measured support contacts below.
+        self.declare_parameter('support_margin_m', 0.04)
+        self.declare_parameter('minimum_support_margin_m', 0.022)
+        self.declare_parameter('start_pose_tolerance_rad', 0.08)
         self.declare_parameter('publish_rate_hz', 30.0)
         self.cycle_duration = float(self.get_parameter('cycle_duration_sec').value)
         self.step_length = float(self.get_parameter('step_length_m').value)
         self.swing_height = float(self.get_parameter('swing_height_m').value)
         self.swing_fraction = float(self.get_parameter('swing_fraction').value)
-        if self.cycle_duration <= 0 or self.step_length <= 0 or self.swing_height < 0:
+        self.support_margin = float(self.get_parameter('support_margin_m').value)
+        self.minimum_support_margin = float(
+            self.get_parameter('minimum_support_margin_m').value
+        )
+        self.start_pose_tolerance = float(
+            self.get_parameter('start_pose_tolerance_rad').value
+        )
+        if (self.cycle_duration <= 0 or self.step_length <= 0
+                or self.swing_height < 0 or self.support_margin <= 0
+                or self.minimum_support_margin <= 0):
             raise ValueError('Cycle and step length must be positive; swing height cannot be negative')
         if not 0.0 < self.swing_fraction < 0.25:
             raise ValueError('swing_fraction must be in (0, 0.25) for a crawl gait')
@@ -212,6 +260,10 @@ class KeyboardWalk(Node):
         )
         self.status_publisher = self.create_publisher(String, '/keyboard_walk/status', 10)
         self.create_subscription(String, '/robot_logger/safety_stop', self._safety_stop, 10)
+        self.contacts = {leg: None for leg in LEGS}
+        self.contact_subs = [self.create_subscription(
+            ContactsState, f'/foot_contacts/{FOOT_LINKS[leg]}/bumper_states',
+            lambda msg, leg=leg: self._contact_cb(leg, msg), 10) for leg in LEGS]
         self.joint_state = None
         self.create_subscription(
             JointState, str(self.get_parameter('joint_states_topic').value),
@@ -220,6 +272,7 @@ class KeyboardWalk(Node):
         self.home = None
         self.home_feet = None
         self.last_output = None
+        self.start_pose_commanded = False
         self.vx = self.vy = self.yaw = 0.0
         self.speed_scale = 1.0
         self.gait = 'crawl'
@@ -247,11 +300,26 @@ class KeyboardWalk(Node):
             self._publish(self._home_output(), 1.0)
         self._publish_status(f'safety_stop:{msg.data}')
 
+    def _contact_cb(self, leg, msg):
+        self.contacts[leg] = bool(msg.states)
+
     def _on_joint_state(self, msg):
         positions = dict(zip(msg.name, msg.position))
         if all(name in positions for name in JOINT_NAMES):
             self.joint_state = {name: float(positions[name]) for name in JOINT_NAMES}
             if self.home is None:
+                measured = [self.joint_state[name] for name in JOINT_NAMES]
+                pose_error = max(abs(a - b) for a, b in zip(measured, BENT_START_POSE))
+                if pose_error > self.start_pose_tolerance and not self.start_pose_commanded:
+                    self.get_logger().info(
+                        f'Moving to validated bent start pose (max initial joint error '
+                        f'{pose_error:.3f} rad) before enabling keyboard walking.'
+                    )
+                    self.start_pose_commanded = True
+                    self._publish(BENT_START_POSE, 10.0)
+                    return
+                if pose_error > self.start_pose_tolerance:
+                    return
                 self.home = {leg: [self.joint_state[name] for name in self.kinematics.chains[leg][1]]
                              for leg in LEGS}
                 self.home_feet = {
@@ -260,7 +328,9 @@ class KeyboardWalk(Node):
                 self.last_output = {
                     name: self.joint_state[name] for name in JOINT_NAMES
                 }
-                self.get_logger().info('Joint feedback ready; holding measured start pose.')
+                self.get_logger().info(
+                    'Validated bent start pose reached; keyboard walking is ready.'
+                )
 
     def _home_output(self):
         return [value for leg in LEGS for value in self.home[leg]]
@@ -315,11 +385,12 @@ class KeyboardWalk(Node):
             upper.append(point)
         return lower[:-1] + upper[:-1]
 
-    def _support_translation(self, support_points, margin_m=0.005):
+    def _support_translation(self, support_points, margin_m=0.005, com_xy=None):
         hull = self._convex_hull(support_points)
         if len(hull) < 3:
             return np.zeros(2)
-        com = self.kinematics.com_xy
+        com = (self.kinematics.com_xy_at(self.joint_state)
+               if com_xy is None else np.asarray(com_xy, dtype=float))
         edges = []
         distances = []
         for index, a_tuple in enumerate(hull):
@@ -334,7 +405,9 @@ class KeyboardWalk(Node):
         if min(distances) >= 0.0:
             index = int(np.argmin(distances))
             _, _, normal, _ = edges[index]
-            return normal * max(0.0, margin_m - distances[index])
+            # Foot targets move opposite to the desired body/COM translation:
+            # with planted feet, moving each target inward shifts the body outward.
+            return -normal * max(0.0, margin_m - distances[index])
 
         nearest_point = None
         nearest_distance = float('inf')
@@ -348,6 +421,24 @@ class KeyboardWalk(Node):
                 nearest_distance = distance
                 nearest_normal = normal
         return com - nearest_point - margin_m * nearest_normal
+
+    def _support_margin(self, support_points):
+        hull = self._convex_hull(support_points)
+        if len(hull) < 3:
+            return -math.inf
+        com = self.kinematics.com_xy_at(self.joint_state)
+        distances = []
+        for i, a_tuple in enumerate(hull):
+            a = np.asarray(a_tuple)
+            edge = np.asarray(hull[(i + 1) % len(hull)]) - a
+            normal = np.array([-edge[1], edge[0]]) / np.linalg.norm(edge)
+            distances.append(float(np.dot(com - a, normal)))
+        return min(distances) if min(distances) >= 0.0 else -min(abs(d) for d in distances if d < 0.0)
+
+    def _measured_foot_xy(self, leg):
+        names = self.kinematics.chains[leg][1]
+        q = [self.joint_state[name] for name in names]
+        return self.kinematics.fk(leg, q)[:2]
 
     def _balance_shift(self, cycle_phase, elapsed):
         stance = 1.0 - self.swing_fraction
@@ -373,18 +464,22 @@ class KeyboardWalk(Node):
                     continue
                 dx, dy, _ = self._leg_offset(other, elapsed)
                 support_points.append(self.home_feet[other][:2] + np.array([dx, dy]))
-            candidates.append((blend, self._support_translation(support_points)))
+            candidates.append((blend, self._support_translation(
+                support_points, margin_m=self.support_margin,
+                com_xy=self.kinematics.com_xy_at(self.joint_state)
+            )))
         if not candidates:
             return np.zeros(3)
         blend, shift = max(candidates, key=lambda item: item[0])
         blend *= self._smooth(elapsed / 3.0)
-        # A few millimeters of temporary body lowering bends the legs and
-        # leaves reach margin for shifting the support triangle.
+        # Lower the body slightly while translating the legs toward the
+        # three-foot support polygon, leaving reach margin before liftoff.
         return np.array([blend * shift[0], blend * shift[1], blend * 0.005])
 
     def _publish(self, positions, duration=0.12):
         msg = JointTrajectory()
-        msg.header.stamp = self.get_clock().now().to_msg()
+        # Interpret each streamed IK target as starting on receipt; the node's
+        # compute time must not make a short trajectory start in the past.
         msg.joint_names = JOINT_NAMES
         point = JointTrajectoryPoint()
         point.positions = [float(v) for v in positions]
@@ -411,10 +506,49 @@ class KeyboardWalk(Node):
         elapsed = (self.get_clock().now() - self.motion_started).nanoseconds / 1e9
         cycle_phase = (elapsed / self.cycle_duration) % 1.0
         balance_shift = self._balance_shift(cycle_phase, elapsed)
+        offsets = CRAWL_OFFSETS if self.gait == 'crawl' else TROT_OFFSETS
+        stance = 1.0 - self.swing_fraction
+        swinging = [leg for leg in LEGS
+                    if (cycle_phase + offsets[leg]) % 1.0 >= stance]
+        if swinging:
+            leg = swinging[0]
+            supports = [other for other in LEGS if other != leg]
+            if not all(self.contacts[other] is True for other in supports):
+                support_states = {support: self.contacts[support] for support in supports}
+                self.vx = self.vy = self.yaw = 0.0
+                self.motion_started = None
+                self.get_logger().error(
+                    f'Crawl stopped before {leg} liftoff: support contact missing '
+                    f'({support_states}).'
+                )
+                self._publish(self._home_output(), 0.5)
+                return
+            # Gate liftoff from measured support feet and the measured-joint
+            # URDF COM. Planned targets alone were optimistic in the first
+            # crawl trial when the joints lagged their IK commands.
+            support_points = [self._measured_foot_xy(other) for other in supports]
+            measured_margin = self._support_margin(support_points)
+            if measured_margin < self.minimum_support_margin:
+                self.vx = self.vy = self.yaw = 0.0
+                self.motion_started = None
+                self.get_logger().error(
+                    f'Crawl stopped before {leg} liftoff: predicted support margin '
+                    f'{measured_margin:.4f} m is below safety minimum '
+                    f'{self.minimum_support_margin:.4f} m.'
+                )
+                self._publish(self._home_output(), 0.5)
+                return
         output = []
         try:
             for leg in LEGS:
                 dx, dy, lift = self._leg_offset(leg, elapsed)
+                phase = (cycle_phase + (CRAWL_OFFSETS if self.gait == 'crawl'
+                                        else TROT_OFFSETS)[leg]) % 1.0
+                if phase >= 1.0 - self.swing_fraction:
+                    progress = (phase - (1.0 - self.swing_fraction)) / self.swing_fraction
+                    blend = math.sin(math.pi * progress) ** 2
+                    dx += SWING_CLEARANCE_XY[leg][0] * blend
+                    dy += SWING_CLEARANCE_XY[leg][1] * blend
                 target = self.home_feet[leg] + np.array([
                     dx + balance_shift[0], dy + balance_shift[1],
                     lift + balance_shift[2]
@@ -429,6 +563,13 @@ class KeyboardWalk(Node):
         self._publish(output)
 
     def handle_key(self, key):
+        if key in ('w', 's', 'a', 'd', 'q', 'e') and not all(
+            self.contacts[leg] is True for leg in LEGS
+        ):
+            self.get_logger().warning(
+                f'Keyboard movement refused until all four feet contact the ground: {self.contacts}'
+            )
+            return
         if key == 'w': self.vx = 1.0; self.crouched = False
         elif key == 's': self.vx = -1.0; self.crouched = False
         elif key == 'a': self.yaw = 1.0; self.crouched = False

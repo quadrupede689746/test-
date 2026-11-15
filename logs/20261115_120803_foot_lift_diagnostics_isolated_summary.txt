@@ -1,0 +1,4 @@
+trial=20261115_120803_foot_lift_diagnostics_isolated
+samples=12491
+first_anomaly=foot_contact_loss; t=0.900000; joint=none; detail=back_left contact lost; probable=foot unloaded or lost ground contact
+first_foot_contact_loss=t=0.900000; joint=none; back_left contact lost
