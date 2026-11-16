@@ -17,6 +17,38 @@ were no separate world files, meshes, or RViz configuration to restore; the
 complete robot meshes included in the archive are kept under
 `open_quadruped/urdf/stl`.
 
+## Two control approaches
+
+This repository contains two ways to generate the robot's joint targets. They
+share the robot model and simulation, but only one high-level controller should
+command the joints at a time.
+
+| Approach | How it works | Main files / launch |
+| --- | --- | --- |
+| **Classical PID + kinematics** | Joystick body-pose IK or keyboard/crawl foot IK computes joint angles. A trajectory bridge sends position targets through `ros2_control` to Gazebo's position controller. | `src/control_library`, `src/open_quadruped/nodes`, `keyboard_sim.launch.py`, `crawl_sim.launch.py` |
+| **PPO (reinforcement learning)** | A trained policy maps sensor readings and velocity commands to joint-position targets. It runs directly in MuJoCo or as a ROS 2 node in Gazebo. | `dog_env.py`, `train.py`, `run_policy.py`, `gazebo_policy_node.py`; instructions in [README_TRAINING.md](README_TRAINING.md) and [README_GAZEBO.md](README_GAZEBO.md) |
+
+The PPO controller still sends position targets to the same simulated joints;
+it replaces the high-level IK/gait command source, not the robot model or the
+joint interface. Do not run the joystick, keyboard gait node, and PPO node as
+joint command sources simultaneously. For PPO in Gazebo, start the simulation
+with `joystick_control:=false` as shown in `README_GAZEBO.md`.
+
+Quick start for each approach (after building the ROS 2 workspace):
+
+```bash
+# Classical IK / crawl control in Gazebo
+ros2 launch open_quadruped crawl_sim.launch.py
+
+# PPO policy in Gazebo: start this node in a second terminal after Gazebo
+python3 gazebo_policy_node.py --ros-args \
+  -p policy:=/absolute/path/to/models/v5/policy.npz \
+  -p use_sim_time:=true -p legacy_gyro:=false
+
+# PPO policy in MuJoCo (activate the project's Python environment first)
+python run_policy.py models/v5/policy.npz
+```
+
 ## Install dependencies (Ubuntu 22.04 + ROS 2 Humble)
 
 The simulator in this port uses Gazebo Classic and `gazebo_ros2_control`,
