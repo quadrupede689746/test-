@@ -28,14 +28,6 @@ def launch_setup(context, *args, **kwargs):
     # --------------------------------------------------
 
     package_share = get_package_share_directory('open_quadruped')
-    initial_joint_positions_raw = LaunchConfiguration(
-        'initial_joint_positions'
-    ).perform(context)
-    initial_joint_positions = [
-        float(value) for value in initial_joint_positions_raw.split(',')
-    ]
-    if len(initial_joint_positions) != 12:
-        raise ValueError('initial_joint_positions must contain 12 comma-separated values.')
 
     xacro_file = os.path.join(
         package_share,
@@ -111,7 +103,7 @@ def launch_setup(context, *args, **kwargs):
             '-entity', 'open_quadruped',
             '-x', '0.0',
             '-y', '0.0',
-            '-z', LaunchConfiguration('spawn_z'),
+            '-z', '0.30',
         ],
     )
 
@@ -166,69 +158,37 @@ def launch_setup(context, *args, **kwargs):
         }],
     )
 
-
-
     # --------------------------------------------------
     # 9. Spawn controllers AFTER robot insertion
     # --------------------------------------------------
 
-    load_joint_state_broadcaster = Node(
-        package='controller_manager',
-        executable='spawner',
-        arguments=[
-            'joint_state_broadcaster', '--inactive',
-            '--controller-manager', '/controller_manager',
-            '--controller-manager-timeout', '120',
-        ],
-        output='screen',
-    )
-    place_bent_stance = Node(
-        package='open_quadruped',
-        executable='place_bent_stance.py',
-        name='place_bent_stance',
-        output='screen',
-        condition=IfCondition(LaunchConfiguration('place_initial_stance')),
-        parameters=[{
-            'joint_positions': initial_joint_positions,
-        }],
-    )
-    load_quadruped_controller = Node(
-        package='controller_manager',
-        executable='spawner',
-        arguments=[
-            'quadruped_controller', '--inactive',
-            '--controller-manager', '/controller_manager',
-            '--controller-manager-timeout', '120',
-        ],
-        output='screen',
-    )
-    unpause_world = ExecuteProcess(
-        cmd=['ros2', 'service', 'call', '/unpause_physics', 'std_srvs/srv/Empty', '{}'],
-        output='screen',
-    )
-    activate_controllers = Node(
-        package='controller_manager',
-        executable='spawner',
-        arguments=[
-            'joint_state_broadcaster', 'quadruped_controller',
-            '--controller-manager', '/controller_manager',
-            '--controller-manager-timeout', '120',
-            '--switch-timeout', '15',
-        ],
-        output='screen',
-    )
-    enable_gravity = Node(
-        package='open_quadruped',
-        executable='enable_robot_gravity.py',
-        name='enable_robot_gravity',
-        output='screen',
-        parameters=[{
-            'model_name': 'open_quadruped',
-            'settle_delay_sec': ParameterValue(
-                LaunchConfiguration('gravity_settle_delay_sec'), value_type=float
+    spawn_controllers = [
+            Node(
+                package='controller_manager',
+                executable='spawner',
+                arguments=[
+                    'joint_state_broadcaster',
+                    '--controller-manager',
+                    '/controller_manager',
+                    '--controller-manager-timeout',
+                    '120',
+                ],
+                output='screen',
             ),
-        }],
-    )
+
+            Node(
+                package='controller_manager',
+                executable='spawner',
+                arguments=[
+                    'quadruped_controller',
+                    '--controller-manager',
+                    '/controller_manager',
+                    '--controller-manager-timeout',
+                    '120',
+                ],
+                output='screen',
+            ),
+    ]
 
     return [
         robot_state_publisher,
@@ -236,36 +196,11 @@ def launch_setup(context, *args, **kwargs):
         joy_node,
         interface_node,
         trajectory_bridge,
-        place_bent_stance,
 
         RegisterEventHandler(
             OnProcessExit(
                 target_action=spawn_robot,
-                on_exit=[load_joint_state_broadcaster],
-            )
-        ),
-        RegisterEventHandler(
-            OnProcessExit(
-                target_action=load_joint_state_broadcaster,
-                on_exit=[load_quadruped_controller],
-            )
-        ),
-        RegisterEventHandler(
-            OnProcessExit(
-                target_action=load_quadruped_controller,
-                on_exit=[unpause_world],
-            )
-        ),
-        RegisterEventHandler(
-            OnProcessExit(
-                target_action=unpause_world,
-                on_exit=[activate_controllers],
-            )
-        ),
-        RegisterEventHandler(
-            OnProcessExit(
-                target_action=activate_controllers,
-                on_exit=[enable_gravity],
+                on_exit=spawn_controllers,
             )
         ),
     ]
@@ -281,9 +216,8 @@ def generate_launch_description():
     # which prevents Gazebo from loading the ROS factory plugin.  Keep the
     # same official plugins, but pass each option and value as separate argv
     # entries so /spawn_entity is guaranteed to be created.
-    gazebo_world = os.path.join(
-        get_package_share_directory('open_quadruped'), 'worlds', 'crawl.world'
-    )
+    gazebo_ros_share = get_package_share_directory('gazebo_ros')
+    gazebo_world = os.path.join(gazebo_ros_share, 'worlds', 'empty.world')
 
     # Both gzserver and gzclient must be able to resolve model:// mesh URIs.
     # The parent of the package share directory contains the
@@ -295,7 +229,7 @@ def generate_launch_description():
     ])
     gazebo = ExecuteProcess(
         cmd=[
-            'gzserver', '-u', gazebo_world,
+            'gzserver', gazebo_world,
             '-s', 'libgazebo_ros_init.so',
             '-s', 'libgazebo_ros_factory.so',
             '--verbose',
@@ -337,23 +271,6 @@ def generate_launch_description():
             'joy_device_id',
             default_value='0',
             description='Joystick device index.',
-        ),
-        DeclareLaunchArgument(
-            'spawn_z', default_value='0.245',
-            description='Initial base_link height in Gazebo.',
-        ),
-        DeclareLaunchArgument(
-            'gravity_settle_delay_sec', default_value='1.0',
-            description='Delay after controller activation before enabling gravity.',
-        ),
-        DeclareLaunchArgument(
-            'initial_joint_positions',
-            default_value='0,0,0,0,0,0,0,0,0,0,0,0',
-            description='12 comma-separated initial joint positions in controller order.',
-        ),
-        DeclareLaunchArgument(
-            'place_initial_stance', default_value='false',
-            description='Lower base after initial joint positions settle.',
         ),
 
         gazebo,

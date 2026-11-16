@@ -132,15 +132,15 @@
                     origin_rpy="0 0 0" origin_xyz="${0.2515-0.16} ${0.0044+0.035} ${0.067-0.045}"
                     parent="front_bracket" child="front_left_hip"
                     effort="4.0" velocity="4.0"
-                    damping="0.2"
-                    friction="0.02"
+                    damping="0.0"
+                    friction="0.0"
                     lower="-1.04"
                     upper="1.04"/>
   <!-- UPPER LEG -->
   <xacro:mesh_link name="front_left_upper_leg"
               origin_rpy="0 0 ${pi/2}" origin_xyz="${-0.252} ${-0.05} ${-0.055}"
               i_rpy="0 0 0" i_xyz="-0.005 0.0175 -0.055"
-              mass="0.10"
+              mass="0.13"
               c_xyz="0 0.02 -0.05"
               length="0.035"
               width="0.035"
@@ -153,15 +153,15 @@
                     origin_rpy="0 0 0" origin_xyz="0.0015 0.045 -0.0087"
                     parent="front_left_hip" child="front_left_upper_leg"
                     effort="4.0" velocity="4.0"
-                    damping="0.2"
-                    friction="0.02"
+                    damping="0.0"
+                    friction="0.0"
                     lower="${-pi/2}"
                     upper="2.59"/>
   <!-- LOWER LEG -->
   <xacro:mesh_link name="front_left_lower_leg"
               origin_rpy="0 0 ${pi/2}" origin_xyz="${-0.247} ${-0.068} ${0.0535}"
               i_rpy="0 0 0" i_xyz="-0.01 0 -0.06"
-              mass="0.10"
+              mass="0.05"
               c_xyz="0 0 -0.06"
               length="0.035"
               width="0.035"
@@ -174,15 +174,15 @@
                     origin_rpy="0 0 0" origin_xyz="-0.005 0.018 -0.109"
                     parent="front_left_upper_leg" child="front_left_lower_leg"
                     effort="4.0" velocity="4.0"
-                    damping="0.2"
-                    friction="0.02"
+                    damping="0.0"
+                    friction="0.0"
                     lower="-2.9"
                     upper="${pi/2}"/>
   <!-- FOOT -->
   <xacro:mesh_link_sphere name="front_left_foot"
               origin_rpy="0 0 ${pi/2}" origin_xyz="${-0.247} ${-0.068} ${0.18}"
               i_rpy="0 0 0" i_xyz="0 0 0"
-              mass="0.03"
+              mass="0.005"
               c_xyz="${-0.247} ${-0.068} ${0.18}"
               length="0.05"
               width="0.065"
@@ -213,15 +213,15 @@
                     origin_rpy="0 0 0" origin_xyz="${-0.2515+0.115} ${0.0044+0.035} ${0.067-0.045}"
                     parent="back_bracket" child="back_left_hip"
                     effort="4.0" velocity="4.0"
-                    damping="0.2"
-                    friction="0.02"
+                    damping="0.0"
+                    friction="0.0"
                     lower="-1.04"
                     upper="1.04"/>
   <!-- UPPER LEG -->
   <xacro:mesh_link name="back_left_upper_leg"
               origin_rpy="0 0 ${pi/2}" origin_xyz="${-0.252} ${-0.05} ${-0.055}"
               i_rpy="0 0 0" i_xyz="-0.005 0.0175 -0.055"
-              mass="0.10"
+              mass="0.13"
               c_xyz="0 0.02 -0.05"
               length="0.035"
               width="0.035"
@@ -234,15 +234,15 @@
                     origin_rpy="0 0 0" origin_xyz="0.0015 0.045 -0.0087"
                     parent="back_left_hip" child="back_left_upper_leg"
                     effort="4.0" velocity="4.0"
-                    damping="0.2"
-                    friction="0.02"
+                    damping="0.0"
+                    friction="0.0"
                     lower="${-pi/2}"
                     upper="2.59"/>
   <!-- LOWER LEG -->
   <xacro:mesh_link name="back_left_lower_leg"
               origin_rpy="0 0 ${pi/2}" origin_xyz="${-0.247} ${-0.068} ${0.0535}"
               i_rpy="0 0 0" i_xyz="-0.01 0 -0.06"
-              mass="0.10"
+              mass="0.05"
               c_xyz="0 0 -0.06"
               length="0.035"
               width="0.035"
@@ -255,15 +255,15 @@
                     origin_rpy="0 0 0" origin_xyz="-0.005 0.018 -0.109"
                     parent="back_left_upper_leg" child="back_left_lower_leg"
                     effort="4.0" velocity="4.0"
-                    damping="0.2"
-                    friction="0.02"
+                    damping="0.0"
+                    friction="0.0"
                     lower="-2.9"
                     upper="${pi/2}"/>
   <!-- FOOT -->
   <xacro:mesh_link_sphere name="back_left_foot"
               origin_rpy="0 0 ${pi/2}" origin_xyz="${-0.247} ${-0.068} ${0.18}"
               i_rpy="0 0 0" i_xyz="0 0 0"
-              mass="0.03"
+              mass="0.005"
               c_xyz="${-0.247} ${-0.068} ${0.18}"
               length="0.05"
               width="0.065"
@@ -294,15 +294,15 @@
                     origin_rpy="0 0 0" origin_xyz="${0.2515-0.16} ${-(0.0044+0.035)} ${0.067-0.045}"
                     parent="front_bracket" child="front_right_hip"
                     effort="4.0" velocity="4.0"
-                    damping="0.2"
-                    friction="0.02"
+                    damping="0.0"
+                    friction="0.0"
                     lower="-1.04"
                     upper="1.04"/>
   <!-- UPPER LEG -->
   <xacro:mesh_link name="front_right_upper_leg"
               origin_rpy="0 0 ${pi/2}" origin_xyz="${-0.252} ${0.12} ${-0.055}"
               i_rpy="0 0 0" i_xyz="-0.005 -0.0175 -0.055"
-              mass="0.10"
+              mass="0.13"
               c_xyz="0 ${-0.02} -0.05"
               length="0.035"
               width="0.035"
@@ -315,15 +315,15 @@
                     origin_rpy="0 0 0" origin_xyz="0.0015 -0.045 -0.0087"
                     parent="front_right_hip" child="front_right_upper_leg"
                     effort="4.0" velocity="4.0"
-                    damping="0.2"
-                    friction="0.02"
+                    damping="0.0"
+                    friction="0.0"
                     lower="${-pi/2}"
                     upper="2.59"/>
   <!-- LOWER LEG -->
   <xacro:mesh_link name="front_right_lower_leg"
               origin_rpy="0 0 ${pi/2}" origin_xyz="${-0.247} ${0.138} ${0.0535}"
               i_rpy="0 0 0" i_xyz="-0.01 0 -0.06"
-              mass="0.10"
+              mass="0.05"
               c_xyz="0 0 -0.06"
               length="0.035"
               width="0.035"
@@ -336,15 +336,15 @@
                     origin_rpy="0 0 0" origin_xyz="-0.005 -0.018 -0.109"
                     parent="front_right_upper_leg" child="front_right_lower_leg"
                     effort="4.0" velocity="4.0"
-                    damping="0.2"
-                    friction="0.02"
+                    damping="0.0"
+                    friction="0.0"
                     lower="-2.9"
                     upper="${pi/2}"/>
   <!-- FOOT -->
   <xacro:mesh_link_sphere name="front_right_foot"
               origin_rpy="0 0 ${pi/2}" origin_xyz="${-0.247} ${0.138} ${0.18}"
               i_rpy="0 0 0" i_xyz="0 0 0"
-              mass="0.03"
+              mass="0.005"
               c_xyz="${-0.247} ${0.138} ${0.18}"
               length="0.05"
               width="0.065"
@@ -375,15 +375,15 @@
                     origin_rpy="0 0 0" origin_xyz="${-0.2515+0.115} ${-(0.0044+0.035)} ${0.067-0.045}"
                     parent="back_bracket" child="back_right_hip"
                     effort="4.0" velocity="4.0"
-                    damping="0.2"
-                    friction="0.02"
+                    damping="0.0"
+                    friction="0.0"
                     lower="-1.04"
                     upper="1.04"/>
   <!-- UPPER LEG -->
   <xacro:mesh_link name="back_right_upper_leg"
               origin_rpy="0 0 ${pi/2}" origin_xyz="${-0.252} ${0.12} ${-0.055}"
               i_rpy="0 0 0" i_xyz="-0.005 -0.0175 -0.055"
-              mass="0.10"
+              mass="0.13"
               c_xyz="0 ${-0.02} -0.05"
               length="0.035"
               width="0.035"
@@ -396,15 +396,15 @@
                     origin_rpy="0 0 0" origin_xyz="0.0015 -0.045 -0.0087"
                     parent="back_right_hip" child="back_right_upper_leg"
                     effort="4.0" velocity="4.0"
-                    damping="0.2"
-                    friction="0.02"
+                    damping="0.0"
+                    friction="0.0"
                     lower="${-pi/2}"
                     upper="2.59"/>
   <!-- LOWER LEG -->
   <xacro:mesh_link name="back_right_lower_leg"
               origin_rpy="0 0 ${pi/2}" origin_xyz="${-0.247} ${0.138} ${0.0535}"
               i_rpy="0 0 0" i_xyz="-0.01 0 -0.06"
-              mass="0.10"
+              mass="0.05"
               c_xyz="0 0 -0.06"
               length="0.035"
               width="0.035"
@@ -417,15 +417,15 @@
                     origin_rpy="0 0 0" origin_xyz="-0.005 -0.018 -0.109"
                     parent="back_right_upper_leg" child="back_right_lower_leg"
                     effort="4.0" velocity="4.0"
-                    damping="0.2"
-                    friction="0.02"
+                    damping="0.0"
+                    friction="0.0"
                     lower="-2.9"
                     upper="${pi/2}"/>
   <!-- FOOT -->
   <xacro:mesh_link_sphere name="back_right_foot"
               origin_rpy="0 0 ${pi/2}" origin_xyz="${-0.247} ${0.138} ${0.18}"
               i_rpy="0 0 0" i_xyz="0 0 0"
-              mass="0.03"
+              mass="0.005"
               c_xyz="${-0.247} ${0.138} ${0.18}"
               length="0.05"
               width="0.065"
@@ -482,91 +482,66 @@
       <command_interface name="position"/>
       <state_interface name="position"/>
       <state_interface name="velocity"/>
-      <state_interface name="effort"/>
     </joint>
     <joint name="motor_front_left_upper_leg">
       <command_interface name="position"/>
       <state_interface name="position"/>
       <state_interface name="velocity"/>
-      <state_interface name="effort"/>
     </joint>
     <joint name="motor_front_left_lower_leg">
       <command_interface name="position"/>
       <state_interface name="position"/>
       <state_interface name="velocity"/>
-      <state_interface name="effort"/>
     </joint>
     <joint name="motor_front_right_hip">
       <command_interface name="position"/>
       <state_interface name="position"/>
       <state_interface name="velocity"/>
-      <state_interface name="effort"/>
     </joint>
     <joint name="motor_front_right_upper_leg">
       <command_interface name="position"/>
       <state_interface name="position"/>
       <state_interface name="velocity"/>
-      <state_interface name="effort"/>
     </joint>
     <joint name="motor_front_right_lower_leg">
       <command_interface name="position"/>
       <state_interface name="position"/>
       <state_interface name="velocity"/>
-      <state_interface name="effort"/>
     </joint>
     <joint name="motor_back_left_hip">
       <command_interface name="position"/>
       <state_interface name="position"/>
       <state_interface name="velocity"/>
-      <state_interface name="effort"/>
     </joint>
     <joint name="motor_back_left_upper_leg">
       <command_interface name="position"/>
       <state_interface name="position"/>
       <state_interface name="velocity"/>
-      <state_interface name="effort"/>
     </joint>
     <joint name="motor_back_left_lower_leg">
       <command_interface name="position"/>
       <state_interface name="position"/>
       <state_interface name="velocity"/>
-      <state_interface name="effort"/>
     </joint>
     <joint name="motor_back_right_hip">
       <command_interface name="position"/>
       <state_interface name="position"/>
       <state_interface name="velocity"/>
-      <state_interface name="effort"/>
     </joint>
     <joint name="motor_back_right_upper_leg">
       <command_interface name="position"/>
       <state_interface name="position"/>
       <state_interface name="velocity"/>
-      <state_interface name="effort"/>
     </joint>
     <joint name="motor_back_right_lower_leg">
       <command_interface name="position"/>
       <state_interface name="position"/>
       <state_interface name="velocity"/>
-      <state_interface name="effort"/>
     </joint>
   </ros2_control>
 
-  <gazebo reference="base_link">
-    <sensor name="base_imu" type="imu">
-      <always_on>true</always_on>
-      <update_rate>100</update_rate>
-      <visualize>false</visualize>
-      <plugin name="gazebo_ros_imu_sensor" filename="libgazebo_ros_imu_sensor.so">
-        <ros><namespace>/</namespace><remapping>~/out:=/imu</remapping></ros>
-        <frame_name>base_link</frame_name>
-      </plugin>
-    </sensor>
-  </gazebo>
-
   <gazebo>
     <plugin name="gazebo_ros2_control" filename="libgazebo_ros2_control.so">
-      <hold_joints>true</hold_joints>
       <robot_param>robot_description</robot_param>
       <robot_param_node>robot_state_publisher</robot_param_node>
       <parameters>$(find open_quadruped)/config/ros2_controllers.yaml</parameters>

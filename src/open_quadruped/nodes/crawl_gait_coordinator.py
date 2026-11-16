@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Coordinate a continuous, slow crawl foot cycle from terminal controls."""
+"""Keyboard-started, one-leg-at-a-time crawl gait coordinator.
+
+The scheduler produces a slow stepping-in-place crawl for validating gait
+timing and IK. Physical forward travel also needs working foot-ground contact
+and a body/stance controller, neither of which is configured in this model.
+"""
 
 import math
 import os
@@ -9,8 +14,8 @@ import termios
 import tty
 
 import rclpy
-from rclpy.duration import Duration
 from rclpy.node import Node
+from rclpy.duration import Duration
 from rclpy.time import Time
 from sensor_msgs.msg import JointState
 from tf2_ros import Buffer, TransformListener, TransformException
@@ -20,6 +25,7 @@ from open_quadruped.msg import JointAngles
 
 
 LEGS = ('fl', 'fr', 'bl', 'br')
+CRAWL_ORDER = ('fl', 'br', 'fr', 'bl')
 LEG_JOINTS = {
     'fl': ('motor_front_left_hip', 'motor_front_left_upper_leg', 'motor_front_left_lower_leg'),
     'fr': ('motor_front_right_hip', 'motor_front_right_upper_leg', 'motor_front_right_lower_leg'),
@@ -36,23 +42,14 @@ HIP_ORIGINS = {
 }
 JOINT_LIMITS = ((-1.04, 1.04), (-math.pi / 2, 2.59), (-2.9, math.pi / 2))
 
-# phase = (cycle_phase + offset) mod 1. With 1/8 swing and 1/4 phase
-# spacing, only one foot swings at a time, in FL, BR, FR, BL order.
-PHASE_OFFSETS = {'fl': 0.75, 'br': 0.50, 'fr': 0.25, 'bl': 0.0}
-
-
-def smoothstep(value):
-    value = max(0.0, min(1.0, value))
-    return value * value * (3.0 - 2.0 * value)
-
 
 class CrawlGaitCoordinator(Node):
     def __init__(self):
         super().__init__('crawl_gait_coordinator')
         self.declare_parameter('step_length_m', 0.04)
         self.declare_parameter('swing_height_m', 0.025)
-        self.declare_parameter('cycle_duration_sec', 8.0)
-        self.declare_parameter('swing_fraction', 0.125)
+        self.declare_parameter('swing_duration_sec', 1.0)
+        self.declare_parameter('dwell_duration_sec', 0.20)
         self.declare_parameter('publish_rate_hz', 30.0)
         self.declare_parameter('base_frame', 'base_link')
         self.declare_parameter('joint_angles_topic', '/joint_angles')
@@ -60,17 +57,17 @@ class CrawlGaitCoordinator(Node):
 
         self.step_length = float(self.get_parameter('step_length_m').value)
         self.swing_height = float(self.get_parameter('swing_height_m').value)
-        self.cycle_duration = float(self.get_parameter('cycle_duration_sec').value)
-        self.swing_fraction = float(self.get_parameter('swing_fraction').value)
+        self.swing_duration = float(self.get_parameter('swing_duration_sec').value)
+        self.dwell_duration = float(self.get_parameter('dwell_duration_sec').value)
         rate = float(self.get_parameter('publish_rate_hz').value)
         for name, value in (
             ('step_length_m', self.step_length), ('swing_height_m', self.swing_height),
-            ('cycle_duration_sec', self.cycle_duration), ('publish_rate_hz', rate),
+            ('swing_duration_sec', self.swing_duration), ('publish_rate_hz', rate),
         ):
             if not math.isfinite(value) or value <= 0.0:
                 raise ValueError(f'{name} must be a positive finite number')
-        if not 0.0 < self.swing_fraction < 0.25:
-            raise ValueError('swing_fraction must be between 0 and 0.25 for non-overlapping swings')
+        if not math.isfinite(self.dwell_duration) or self.dwell_duration < 0.0:
+            raise ValueError('dwell_duration_sec must be finite and non-negative')
         if self.step_length > 0.10 or self.swing_height > 0.08:
             raise ValueError('step_length_m must be <= 0.10 and swing_height_m <= 0.08 for this first test')
 
@@ -93,12 +90,16 @@ class CrawlGaitCoordinator(Node):
         self.ready = False
 
         self.running = False
-        self.pause_requested = False
-        self.exit_requested = False
-        self.exit_after_pause = False
-        self.elapsed_before_start = 0.0
-        self.run_started_at = None
-        self.last_logged_swing = None
+        self.stop_after_swing = False
+        self.exit_after_swing = False
+        self.sequence_index = 0
+        self.leg_side = {leg: -1 for leg in LEGS}
+        self.active_leg = None
+        self.swing_start = None
+        self.swing_end = None
+        self.swing_started_at = None
+        self.next_swing_at = None
+
         self.timer = self.create_timer(1.0 / rate, self._tick)
 
     def _on_joint_state(self, msg):
@@ -110,12 +111,12 @@ class CrawlGaitCoordinator(Node):
             }
 
     def _read_feet(self):
-        feet = {}
+        result = {}
         for leg, frame in FOOT_FRAMES.items():
             transform = self.tf_buffer.lookup_transform(self.base_frame, frame, Time())
             p = transform.transform.translation
-            feet[leg] = [float(p.x), float(p.y), float(p.z)]
-        return feet
+            result[leg] = [float(p.x), float(p.y), float(p.z)]
+        return result
 
     def _initialize(self):
         if self.joint_state is None:
@@ -126,16 +127,18 @@ class CrawlGaitCoordinator(Node):
             for leg in LEGS:
                 hx, hy, hz = HIP_ORIGINS[leg]
                 fx, fy, fz = feet[leg]
-                vector = ((hx - fx) * 1000.0, (hy - fy) * 1000.0, (hz - fz) * 1000.0)
-                home_ik[leg] = self.ik.ja_from_htf_vecs([vector])[0]
-            self.home_feet = {leg: list(point) for leg, point in feet.items()}
-            self.targets = {leg: list(point) for leg, point in feet.items()}
+                vec = ((hx - fx) * 1000.0, (hy - fy) * 1000.0, (hz - fz) * 1000.0)
+                home_ik[leg] = self.ik.ja_from_htf_vecs([vec])[0]
+            self.home_feet = {leg: list(p) for leg, p in feet.items()}
+            self.targets = {leg: list(p) for leg, p in feet.items()}
             self.home_ik = home_ik
             self.home_joints = {
                 leg: [self.joint_state[name] for name in LEG_JOINTS[leg]] for leg in LEGS
             }
             self.ready = True
-            self.get_logger().info('Feedback ready. Press g to start the continuous crawl; no motion before then.')
+            self.get_logger().info(
+                'Feedback ready. Press g to start the crawl; no motion is sent before then.'
+            )
             return True
         except (TransformException, ArithmeticError, ValueError) as exc:
             self.get_logger().warning(f'Waiting for a complete foot transform/IK solution: {exc}')
@@ -146,69 +149,75 @@ class CrawlGaitCoordinator(Node):
             self.get_logger().warning('Cannot start yet; waiting for TF and /joint_states.')
             return
         if self.running:
-            self.pause_requested = True
-            self.get_logger().info('Pause requested; holding after the current foot swing lands.')
+            if self.active_leg is None:
+                self.running = False
+                self.stop_after_swing = False
+                self.get_logger().info('Crawl paused between steps.')
+            else:
+                self.stop_after_swing = True
+                self.get_logger().info('Will pause after the current foot lands.')
         else:
+            self.stop_after_swing = False
             self.running = True
-            self.pause_requested = False
-            self.run_started_at = self.get_clock().now()
+            self.next_swing_at = self.get_clock().now()
             self.get_logger().info(
-                f'Continuous crawl started: step length {self.step_length:.3f} m, '
-                f'cycle {self.cycle_duration:.1f} s.'
+                f'Crawl started: order FL, BR, FR, BL; stride {self.step_length:.3f} m.'
             )
 
     def adjust_stride(self, delta):
         self.step_length = max(0.01, min(0.10, self.step_length + delta))
-        self.get_logger().info(f'Step length set to {self.step_length:.3f} m peak-to-peak.')
+        self.get_logger().info(f'Step length set to {self.step_length:.3f} m.')
 
     def request_exit(self):
-        if self.running:
-            self.exit_requested = True
-            self.pause_requested = True
-            self.get_logger().info('Exiting after the current swing lands.')
+        if self.active_leg is None:
+            self.running = False
+            self.exit_after_swing = True
         else:
-            self.exit_after_pause = True
+            self.running = False
+            self.stop_after_swing = True
+            self.exit_after_swing = True
+            self.get_logger().info('Exiting after the active foot lands.')
 
-    def _elapsed(self, now):
-        elapsed = self.elapsed_before_start
-        if self.running and self.run_started_at is not None:
-            elapsed += (now - self.run_started_at).nanoseconds / 1e9
-        return elapsed
+    def _begin_next_swing(self, now):
+        leg = CRAWL_ORDER[self.sequence_index]
+        home = self.home_feet[leg]
+        start = list(self.targets[leg])
+        # Alternate between two X footholds around the measured home position.
+        next_side = -self.leg_side[leg]
+        end = [home[0] + next_side * self.step_length / 2.0, home[1], home[2]]
+        self.active_leg = leg
+        self.swing_start = start
+        self.swing_end = end
+        self.swing_started_at = now
+        self.next_swing_at = None
+        self.pending_side = next_side
+        self.get_logger().info(
+            f'Swing {leg.upper()} to X offset {next_side * self.step_length / 2.0:+.3f} m.'
+        )
 
-    def _leg_phase(self, cycle_phase, leg):
-        return (cycle_phase + PHASE_OFFSETS[leg]) % 1.0
-
-    def _swinging_legs(self, cycle_phase):
-        swing_start = 1.0 - self.swing_fraction
-        return [leg for leg in LEGS if self._leg_phase(cycle_phase, leg) >= swing_start]
-
-    def _stance_x(self, phase):
-        stance_fraction = 1.0 - self.swing_fraction
-        return self.step_length / 2.0 - self.step_length * smoothstep(phase / stance_fraction)
-
-    def _update_foot_targets(self, cycle_phase):
-        stance_fraction = 1.0 - self.swing_fraction
-        swing_start = stance_fraction
-        for leg in LEGS:
-            leg_phase = self._leg_phase(cycle_phase, leg)
-            reference_phase = PHASE_OFFSETS[leg]
-            reference_x = self._stance_x(reference_phase)
-            if leg_phase < stance_fraction:
-                x_offset = self._stance_x(leg_phase) - reference_x
-                z_offset = 0.0
-            else:
-                swing_phase = (leg_phase - swing_start) / self.swing_fraction
-                x_offset = (
-                    -self.step_length / 2.0
-                    + self.step_length * smoothstep(swing_phase)
-                    - reference_x
-                )
-                z_offset = self.swing_height * math.sin(math.pi * swing_phase) ** 2
-            self.targets[leg] = [
-                self.home_feet[leg][0] + x_offset,
-                self.home_feet[leg][1],
-                self.home_feet[leg][2] + z_offset,
-            ]
+    def _advance_gait(self, now):
+        if self.active_leg is not None:
+            t = (now - self.swing_started_at).nanoseconds / 1e9 / self.swing_duration
+            t = max(0.0, min(1.0, t))
+            u = t * t * (3.0 - 2.0 * t)
+            leg = self.active_leg
+            p = [self.swing_start[i] + (self.swing_end[i] - self.swing_start[i]) * u for i in range(3)]
+            p[2] = self.swing_start[2] + self.swing_height * math.sin(math.pi * u)
+            self.targets[leg] = p
+            if t >= 1.0:
+                self.targets[leg] = list(self.swing_end)
+                self.leg_side[leg] = self.pending_side
+                self.active_leg = None
+                self.sequence_index = (self.sequence_index + 1) % len(CRAWL_ORDER)
+                self.next_swing_at = now + Duration(seconds=self.dwell_duration)
+                self.get_logger().info(f'{leg.upper()} landed; next leg follows after the dwell.')
+                if self.stop_after_swing:
+                    self.running = False
+                    self.stop_after_swing = False
+                    self.get_logger().info('Crawl paused with the current foot on the ground.')
+            return
+        if self.running and self.next_swing_at is not None and now >= self.next_swing_at:
+            self._begin_next_swing(now)
 
     def _publish_targets(self):
         joint_matrix = {}
@@ -234,33 +243,14 @@ class CrawlGaitCoordinator(Node):
     def _tick(self):
         if not self.ready and not self._initialize():
             return
-        now = self.get_clock().now()
-        elapsed = self._elapsed(now)
-        cycle_phase = (elapsed / self.cycle_duration) % 1.0
-        self._update_foot_targets(cycle_phase)
-        was_running = self.running
-
-        swinging = self._swinging_legs(cycle_phase)
-        if swinging != self.last_logged_swing:
-            if swinging:
-                self.get_logger().info(f'Swing phase: {swinging[0].upper()}')
-            self.last_logged_swing = swinging
-
-        if self.running and self.pause_requested and not swinging:
-            self.elapsed_before_start = elapsed
-            self.running = False
-            self.run_started_at = None
-            self.pause_requested = False
-            self.get_logger().info('Crawl paused between foot swings.')
-            if self.exit_requested:
-                self.exit_after_pause = True
-
-        if self.running or was_running:
+        was_swinging = self.active_leg is not None
+        self._advance_gait(self.get_clock().now())
+        if self.active_leg is not None or was_swinging:
             try:
                 self._publish_targets()
             except (ArithmeticError, ValueError) as exc:
                 self.running = False
-                self.pause_requested = False
+                self.active_leg = None
                 self.get_logger().error(f'Gait stopped; no valid joint command: {exc}')
 
 
@@ -269,6 +259,12 @@ def read_key():
     if not ready:
         return None
     byte = os.read(sys.stdin.fileno(), 1)
+    if byte == b'\x1b':
+        if not select.select([sys.stdin], [], [], 0.02)[0]:
+            return 'escape'
+        os.read(sys.stdin.fileno(), 1)
+        tail = os.read(sys.stdin.fileno(), 1)
+        return {b'A': 'up', b'B': 'down'}.get(tail, 'escape')
     return byte.decode(errors='ignore')
 
 
@@ -279,13 +275,14 @@ def main(args=None):
     node = CrawlGaitCoordinator()
     fd = sys.stdin.fileno()
     old = termios.tcgetattr(fd)
+    should_exit = False
     try:
         tty.setcbreak(fd)
-        print('\r\nContinuous crawl: g=start/pause safely, +/-=step length, q=quit after landing\r')
-        print(f'Step {node.step_length:.3f} m peak-to-peak; lift {node.swing_height:.3f} m; cycle {node.cycle_duration:.1f} s\r')
-        while rclpy.ok():
+        print('\r\nCrawl gait: g=start/pause after landing, +/-=step length, q=quit\r')
+        print(f'Step length {node.step_length:.3f} m; lift {node.swing_height:.3f} m\r')
+        while rclpy.ok() and not should_exit:
             rclpy.spin_once(node, timeout_sec=0.0)
-            if node.exit_after_pause:
+            if node.exit_after_swing and node.active_leg is None:
                 break
             key = read_key()
             if key in ('g', 'G'):
@@ -296,8 +293,8 @@ def main(args=None):
                 node.adjust_stride(-0.01)
             elif key == 'q':
                 node.request_exit()
-                if node.exit_after_pause:
-                    break
+                if node.exit_after_swing and node.active_leg is None:
+                    should_exit = True
     except KeyboardInterrupt:
         pass
     finally:

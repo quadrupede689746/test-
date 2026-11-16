@@ -205,8 +205,3 @@ This launch targets Gazebo Classic because that is the simulator family used
 by the original model. Gazebo Classic reached end of life in January 2025; for
 newer Gazebo releases, the simulation plugin and launch should be migrated to
 `gz_ros2_control` rather than `gazebo_ros2_control`.
-# test-
-# test-
-# test-
-# test-
-# test-
